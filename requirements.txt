@@ -1,4 +1,5 @@
-flask
-python-telegram-bot
+python-telegram-bot==21.6
+Flask==3.0.3
+requests==2.32.3
+tzdata
 openai
-werkzeug
