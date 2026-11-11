@@ -1,6 +1,5 @@
 """
-SKATE10 v42 (Polonia) - Arquitectura Híbrida: Perplexity Agent API (/v1/responses) + OpenAI
-Adaptado para la TT Elite Series de Polonia (Partidos leídos desde partidos.txt).
+TT Elite Series - Arquitectura Híbrida Rigurosa: Perplexity Agent API (/v1/responses) + OpenAI
 """
 
 import asyncio
@@ -30,9 +29,9 @@ PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "180"))
-DB_PATH = os.getenv("DB_PATH", "skate10_polonia.db")
+DB_PATH = os.getenv("DB_PATH", "tt_elite.db")
 
-LEAD_MIN = 35
+LEAD_MIN = 45
 MIN_LEAD_MIN = 10
 
 DAILY_MIN_100 = 4
@@ -47,7 +46,7 @@ logging.basicConfig(
 )
 for noisy in ("httpx", "httpcore", "urllib3"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
-log = logging.getLogger("SKATE10_POLONIA")
+log = logging.getLogger("TT_ELITE")
 
 web = Flask(__name__)
 started_at = time.time()
@@ -121,22 +120,19 @@ def extraer_texto_perplexity(data: dict) -> str:
 
 
 def investigar_con_perplexity(player1: str, player2: str) -> str:
-    """
-    Consulta el nuevo endpoint /v1/responses de Perplexity con búsqueda web en tiempo real.
-    """
     if not PERPLEXITY_API_KEY:
-        log.warning("PERPLEXITY_API_KEY no configurada. Saltando búsqueda web en vivo.")
-        return "Sin datos web en tiempo real (API de Perplexity no configurada)."
+        log.warning("PERPLEXITY_API_KEY no configurada.")
+        return "Sin datos web en tiempo real."
 
     fecha_hoy = datetime.now(TZ).strftime("%Y-%m-%d")
     prompt_busqueda = (
         f"Busca información estadística real, actualizada al día de hoy ({fecha_hoy}), "
         f"sobre el enfrentamiento de tenis de mesa de la TT Elite Series de Polonia entre {player1} y {player2}. "
-        f"Necesito datos concretos y verificables: "
-        f"1. Resultados de los últimos 5 partidos jugados por {player1} en TT Elite Series (y cómo le fue hoy). "
-        f"2. Resultados de los últimos 5 partidos jugados por {player2} en TT Elite Series (y cómo le fue hoy). "
-        f"3. Historial Head-to-Head (H2H) directo reciente entre {player1} y {player2} y marcadores habituales. "
-        f"4. Racha actual y quién llega con mejor rendimiento. Sé directo y conciso."
+        f"Necesito datos concretos y verificables de forma independiente para cada uno: "
+        f"1. Resultados recientes de {player1} en la TT Elite Series y partidos jugados hoy. "
+        f"2. Resultados recientes de {player2} en la TT Elite Series y partidos jugados hoy. "
+        f"3. Historial Head-to-Head (H2H) directo entre ambos jugadores. "
+        f"Indica con absoluta imparcialidad quién tiene mejor rendimiento actual."
     )
 
     headers = {
@@ -144,7 +140,6 @@ def investigar_con_perplexity(player1: str, player2: str) -> str:
         "Content-Type": "application/json"
     }
 
-    # Intento 1: Nuevo endpoint oficial Perplexity Agent API (/v1/responses)
     payloads = [
         {
             "model": "perplexity/sonar",
@@ -154,11 +149,6 @@ def investigar_con_perplexity(player1: str, player2: str) -> str:
         {
             "model": "sonar",
             "input": prompt_busqueda
-        },
-        {
-            "model": "openai/gpt-5-mini",
-            "input": prompt_busqueda,
-            "tools": [{"type": "web_search"}]
         }
     ]
 
@@ -173,59 +163,55 @@ def investigar_con_perplexity(player1: str, player2: str) -> str:
             if resp.status_code == 200:
                 texto = extraer_texto_perplexity(resp.json())
                 if texto:
-                    log.info("Perplexity (/v1/responses) investigó con éxito: %s vs %s", player1, player2)
+                    log.info("Perplexity investigó con éxito (TT Elite): %s vs %s", player1, player2)
                     return texto
-            else:
-                log.debug("Intento Perplexity (%s) devolvió %s: %s", payload.get("model"), resp.status_code, resp.text[:180])
         except Exception as exc:
-            log.debug("Excepción en intento Perplexity: %s", exc)
+            log.debug("Excepción en Perplexity: %s", exc)
 
-    log.warning("No se pudo extraer respuesta de Perplexity /v1/responses para %s vs %s.", player1, player2)
-    return "Usa análisis técnico estadístico de TT Elite Series para este cruce."
+    return "No se pudo extraer información en vivo de Perplexity."
 
 
-# ---------------- PASO 2: OPENAI (ANÁLISIS CUANTITATIVO: TT ELITE SERIES) ----------------
+# ---------------- PASO 2: OPENAI (ANÁLISIS NEUTRAL Y ANTI-SESGO) ----------------
 
 def analizar_partido(player1: str, player2: str):
     datos_perplexity = investigar_con_perplexity(player1, player2)
 
     if not openai_client:
-        return player1, 7.5, 75, f"📊 Probabilidades: {player1}: 50% | {player2}: 50%\nArgumentos: Respaldo por falta de OpenAI API.\nValue Bet: No"
+        return player1, 7.5, 75, f"📊 Probabilidades: {player1}: 50% | {player2}: 50%\nArgumentos: Sin OpenAI.\nValue Bet: No"
 
     prompt_analisis = f"""
-Actúa como un analista cuantitativo profesional de tenis de mesa (TT Elite Series de Polonia).
-REGLA ABSOLUTA: Entorno de mesa 100% neutral. En el tenis de mesa NO existe localía ni ventaja por ser nombrado primero o segundo.
+Actúa como un analista cuantitativo profesional de tenis de mesa (TT Elite Series Polonia).
+REGLA ABSOLUTA Y ANTI-SESGO: El orden en que se nombra a los jugadores ({player1} vs {player2}) es totalmente aleatorio. NUNCA asumas que el primero es el favorito. Analiza de forma completamente objetiva e independiente a ambos basándote en los datos reales.
 
-Analiza específicamente a este par de atletas en la TT Elite Series:
+Enfrentamiento:
 - Jugador 1: {player1}
 - Jugador 2: {player2}
 
-INFORMACIÓN REAL EN TIEMPO REAL EXTRAÍDA DE LA WEB (PERPLEXITY):
+DATOS REALES OBTENIDOS DE LA WEB (PERPLEXITY):
 \"\"\"
 {datos_perplexity}
 \"\"\"
 
 INSTRUCCIONES DE EVALUACIÓN:
-1. Evalúa estrictamente a {player1} contra {player2} basándote en los datos reales anteriores (últimos partidos jugados en TT Elite Series, rendimiento en el día de hoy, dominio en el H2H directo y consistencia).
-2. Determina quién tiene la mayor probabilidad real de ganar hoy y asigna porcentajes exactos a cada uno (deben sumar 100%).
-3. Si el ganador es el Jugador 1, pon exactamente "{player1}" en el campo "fav". Si es el Jugador 2, pon exactamente "{player2}".
-4. Redacta en "resumen" un argumento técnico real (máximo 2 líneas) citando los datos encontrados (racha del día, H2H o tendencia de sets en Polonia). PROHIBIDO inventar localías o usar frases genéricas.
+1. Compara de forma estricta las estadísticas reales de {player1} frente a {player2} (rendimiento de hoy, racha de últimos partidos y H2H).
+2. Determina el verdadero favorito basándote únicamente en los datos y asígnale los porcentajes correctos (deben sumar 100%). Si el mejor es el Jugador 2, {player2} debe ir en el campo "fav".
+3. Redacta en "resumen" un argumento técnico de por qué gana el favorito según los datos encontrados.
 
-Devuelve estrictamente un JSON válido con esta estructura compacta:
+Devuelve estrictamente un JSON válido:
 {{
-  "fav": "Nombre exacto del ganador real (debe ser exactamente '{player1}' o '{player2}')",
-  "prob_p1": 78,
-  "prob_p2": 22,
-  "rating": 8.8,
-  "resumen": "Argumento técnico, específico y exclusivo basado en los últimos partidos reales, racha del día y H2H.",
-  "value_bet": "Sí / No (con breve justificación)"
+  "fav": "Nombre exacto del ganador real ('{player1}' o '{player2}')",
+  "prob_p1": 40,
+  "prob_p2": 60,
+  "rating": 8.5,
+  "resumen": "Justificación basada en el rendimiento real y H2H.",
+  "value_bet": "Sí / No"
 }}
 """
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt_analisis}],
-            temperature=0.2,
+            temperature=0.1,
             max_tokens=300
         )
         content = response.choices[0].message.content.strip()
@@ -246,7 +232,7 @@ Devuelve estrictamente un JSON válido con esta estructura compacta:
             fav = player2
             prob_ganador = prob_p2
 
-        resumen = data.get("resumen", "Análisis basado en rendimiento reciente en la TT Elite Series.")
+        resumen = data.get("resumen", "Análisis basado en rendimiento reciente.")
         value_bet = data.get("value_bet", "No")
 
         details = (
@@ -257,16 +243,15 @@ Devuelve estrictamente un JSON válido con esta estructura compacta:
         return fav, rating, prob_ganador, details
 
     except Exception as exc:
-        log.warning("Error en OpenAI (%s).", exc)
-        return player1, 7.5, 75, f"📊 Probabilidades: {player1}: 50% | {player2}: 50%\nArgumentos: Respaldo por error de red en API\nValue Bet: No"
+        log.warning("Error en OpenAI: %s", exc)
+        return player1, 7.5, 75, f"📊 Probabilidades: {player1}: 50% | {player2}: 50%\nArgumentos: Error de análisis\nValue Bet: No"
 
 
 # ---------------- CARGA DE PARTIDOS Y FRANJAS HORARIAS ----------------
 
-def cargar_partidos_desd_txt():
+def cargar_partidos_desde_txt():
     archivo = "partidos.txt"
     if not os.path.exists(archivo):
-        log.warning("El archivo 'partidos.txt' no existe. Créalo con los partidos del día.")
         return []
 
     partidos = []
@@ -313,13 +298,13 @@ def cargar_partidos_desd_txt():
 
 
 def fetch_fixtures_only():
-    items = cargar_partidos_desd_txt()
+    items = cargar_partidos_desde_txt()
     with db() as c:
         for it in items:
             c.execute("""INSERT OR IGNORE INTO fixtures(event_id, player1, player2, start_ts, hour_block) 
                          VALUES (?,?,?,?,?)""",
                       (it["id"], it["player1"], it["player2"], it["timestamp"], it["hour_block"]))
-    log.info("Cartelera cargada en base de datos: %s eventos desde partidos.txt (TT Elite Series).", len(items))
+    log.info("Cartelera TT Elite cargada: %s eventos.", len(items))
 
 
 def resolve_results():
@@ -331,59 +316,7 @@ def resolve_results():
             c.execute("UPDATE picks SET hit=1 WHERE event_id=?", (r["event_id"],))
 
 
-# ---------------- FORMATO LIMPIO Y ESTRUCTURADO ----------------
-
-def format_message(p, flow, mins, prob):
-    kickoff = datetime.fromtimestamp(p["start_ts"], TZ).strftime("%I:%M %p").lstrip("0")
-    stake = 100 if flow == "100" else int(max(7, min(9, round(p["rating"]))))
-
-    if flow == "100":
-        header = f"🔥 STAKE 100 [TT Elite Series] (Favorito: {prob}%)"
-    else:
-        header = f"🏓 PICK FRANJA HORARIA [TT Elite Series] (Favorito: {prob}%)"
-
-    lines = [
-        header,
-        f"🏆 Ganador: {p['fav']}",
-        f"⚔️ {p['player1']} vs {p['player2']}",
-        f"⏱️ Inicio: {kickoff} (Col) | Stake: {stake}",
-        f"⏳ Arranca en ~{max(1, int(mins))} min"
-    ]
-
-    if p["details"]:
-        clean_details = p["details"].replace("<b>", "").replace("</b>", "").replace("🔹 ", "").replace("🎯 ", "")
-        lines += ["", f"📋 Análisis TT Elite Series (Datos en Vivo):\n{clean_details}"]
-
-    return "\n".join(lines)
-
-
-async def send_pick(app, p, flow, mins, prob):
-    text = format_message(p, flow, mins, prob)
-    keyboard = [[InlineKeyboardButton("📤 Enviar a otros chats", switch_inline_query=text)]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await app.bot.send_message(
-        chat_id=CHAT_ID,
-        text=text,
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=reply_markup
-    )
-
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.data.startswith("enviar_pick_"):
-        await query.edit_message_reply_markup(reply_markup=None)
-        await context.bot.send_message(
-            chat_id=CHAT_ID,
-            text="✅ <b>¡Apuesta lista para compartir!</b>",
-            parse_mode="HTML"
-        )
-
-
-# ---------------- SELECCIÓN DE FRANJA HORARIA Y STAKE 100 ----------------
+# ---------------- SELECCIÓN Y GESTIÓN DE FRANJAS ----------------
 
 def select_best_pick_for_current_blocks():
     now = int(time.time())
@@ -416,7 +349,7 @@ def select_best_pick_for_current_blocks():
     if not block_matches:
         return None, None, 0
 
-    log.info("Evaluando franja horaria TT Elite %s (%d partidos en la hora)...", target_block, len(block_matches))
+    log.info("Evaluando franja TT Elite %s (%d partidos)...", target_block, len(block_matches))
 
     analyzed_rows = []
     with db() as c:
@@ -445,7 +378,7 @@ def select_best_pick_for_current_blocks():
                 })
 
     if not analyzed_rows:
-        log.info("Ningún partido de la franja %s superó el %d%% requerido.", target_block, FRANJA_MIN_PROB)
+        log.info("Ningún partido de la franja %s superó el %d%%.", target_block, FRANJA_MIN_PROB)
         return None, None, 0
 
     analyzed_rows.sort(key=lambda x: (x["prob"], x["rating"]), reverse=True)
@@ -459,6 +392,58 @@ def select_best_pick_for_current_blocks():
         flow = "100"
 
     return best_match, flow, best_match["prob"]
+
+
+# ---------------- FORMATO Y ENVÍO A TELEGRAM ----------------
+
+def format_message(p, flow, mins, prob):
+    kickoff = datetime.fromtimestamp(p["start_ts"], TZ).strftime("%I:%M %p").lstrip("0")
+    stake = 100 if flow == "100" else int(max(7, min(9, round(p["rating"]))))
+
+    if flow == "100":
+        header = f"🔥 TT ELITE - STAKE 100 (Favorito: {prob}%)"
+    else:
+        header = f"🏓 TT ELITE - PICK FRANJA (Favorito: {prob}%)"
+
+    lines = [
+        header,
+        f"🏆 Ganador: {p['fav']}",
+        f"⚔️ {p['player1']} vs {p['player2']}",
+        f"⏱️ Inicio: {kickoff} (Col) | Stake: {stake}",
+        f"⏳ Arranca en ~{max(1, int(mins))} min"
+    ]
+
+    if p["details"]:
+        clean_details = p["details"].replace("<b>", "").replace("</b>", "")
+        lines += ["", f"📋 Análisis en Vivo (Perplexity + OpenAI):\n{clean_details}"]
+
+    return "\n".join(lines)
+
+
+async def send_pick(app, p, flow, mins, prob):
+    text = format_message(p, flow, mins, prob)
+    keyboard = [[InlineKeyboardButton("📤 Enviar a otros chats", switch_inline_query=text)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await app.bot.send_message(
+        chat_id=CHAT_ID,
+        text=text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=reply_markup
+    )
+
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data.startswith("enviar_pick_"):
+        await query.edit_message_reply_markup(reply_markup=None)
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
+            text="✅ <b>¡Pick TT Elite listo!</b>",
+            parse_mode="HTML"
+        )
 
 
 async def run_cycle(app):
@@ -477,8 +462,8 @@ async def run_cycle(app):
                 (best_p["event_id"], flow, best_p["rating"], best_p["fav"], best_p["player1"],
                  best_p["player2"], best_p["start_ts"], int(time.time()), best_p["details"], best_p["hour_block"]))
 
-        log.info("Enviado pick limpio TT Elite Series (Franja %s - Flujo: %s): %s (Prob: %d%%)",
-                 best_p["hour_block"], flow, best_p["fav"], prob)
+        log.info("Pick TT Elite enviado -> Franja: %s | Ganador: %s (%d%%)",
+                 best_p["hour_block"], best_p["fav"], prob)
 
 
 async def monitor_loop(app: Application):
@@ -486,22 +471,21 @@ async def monitor_loop(app: Application):
         try:
             await run_cycle(app)
         except Exception as exc:
-            log.error("Fallo en bucle: %s", str(exc)[:300])
+            log.error("Fallo en bucle TT Elite: %s", str(exc)[:300])
         await asyncio.sleep(POLL_SECONDS)
 
 
 # ---------------- COMANDOS TELEGRAM ----------------
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🏓 SKATE10 TT Elite Series (Polonia · Perplexity + OpenAI) Activo.\n/estado · /resumen · /partidos · /test")
+    await update.message.reply_text("🏓 TT Elite Series Bot Activo.\n/estado · /resumen · /partidos · /test")
 
 
 async def cmd_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     pplx_ok = "✅ Conectada" if PERPLEXITY_API_KEY else "⚠️ Sin API Key"
     oai_ok = "✅ Conectada" if openai_client else "⚠️ Sin API Key"
     await update.message.reply_text(
-        f"✅ SKATE10 TT Elite Series operativo.\n"
-        f"Hora Colombia: {datetime.now(TZ).strftime('%I:%M %p')}\n"
+        f"✅ TT Elite Series Operativo.\n"
         f"Perplexity Web (/v1/responses): {pplx_ok}\n"
         f"OpenAI Análisis: {oai_ok}"
     )
@@ -510,9 +494,7 @@ async def cmd_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_estado(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     with db() as c:
         n_fix = c.execute("SELECT COUNT(*) FROM fixtures WHERE start_ts>?", (int(time.time()),)).fetchone()[0]
-    await update.message.reply_text(
-        f"🟢 Estado del Sistema (Polonia)\nPartidos futuros: {n_fix}\nStakes 100 enviados hoy: {count_100_today()}/{DAILY_MIN_100}"
-    )
+    await update.message.reply_text(f"🟢 TT Elite Estado\nPartidos en cola: {n_fix}")
 
 
 async def cmd_resumen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -521,9 +503,9 @@ async def cmd_resumen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             FROM picks WHERE hit IS NOT NULL GROUP BY flow, r ORDER BY flow, r DESC""").fetchall()
         pend = c.execute("SELECT COUNT(*) FROM picks WHERE hit IS NULL").fetchone()[0]
     if not rows:
-        await update.message.reply_text(f"Sin pronósticos resueltos todavía. Pendientes: {pend}")
+        await update.message.reply_text(f"Sin picks resueltos aún. Pendientes: {pend}")
         return
-    lines = ["📈 Rendimiento TT Elite Series"] + [f"• {r['flow']} · nota {r['r']}: {r['h']}/{r['n']} ({100 * r['h'] / r['n']:.0f}%)" for r in rows]
+    lines = ["📈 Rendimiento TT Elite"] + [f"• {r['flow']} · nota {r['r']}: {r['h']}/{r['n']} ({100 * r['h'] / r['n']:.0f}%)" for r in rows]
     await update.message.reply_text("\n".join(lines + [f"Pendientes: {pend}"]))
 
 
@@ -535,10 +517,10 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             (now,)).fetchall()
 
     if not rows:
-        await update.message.reply_text("Sin partidos programados o archivo partidos.txt vacío.")
+        await update.message.reply_text("Sin partidos programados en la TT Elite.")
         return
 
-    lines = [f"📋 <b>Cartelera TT Elite Series (Hora Col: {datetime.now(TZ).strftime('%I:%M %p')}):</b>"]
+    lines = [f"📋 <b>Cartelera TT Elite Próxima:</b>"]
     for r in rows:
         hh = datetime.fromtimestamp(r["start_ts"], TZ).strftime("%I:%M %p")
         lines.append(f"• <b>{hh}</b> | {r['player1']} vs {r['player2']}")
@@ -550,7 +532,7 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 @web.get("/")
 def home():
-    return "SKATE10 v42 (TT Elite Series Polonia) Activo - Perplexity + OpenAI", 200
+    return "TT Elite Series Bot Activo", 200
 
 
 @web.get("/health")
@@ -570,13 +552,9 @@ async def post_init(application: Application):
 
 def main():
     if not TOKEN or not CHAT_ID:
-        raise RuntimeError("Faltan variables de entorno esenciales (TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID).")
+        raise RuntimeError("Faltan variables esenciales para TT Elite.")
     init_db()
     threading.Thread(target=run_web, daemon=True).start()
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     for name, fn in [("start", cmd_start), ("test", cmd_test), ("estado", cmd_estado),
@@ -585,7 +563,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    log.info("Iniciando SKATE10 v42 TT Elite Series (Perplexity /v1/responses + OpenAI)...")
+    log.info("Iniciando TT Elite Series Bot (Perplexity /v1/responses + OpenAI Anti-Sesgo)...")
     app.run_polling(drop_pending_updates=True)
 
 
