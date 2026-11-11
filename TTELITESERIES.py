@@ -1,10 +1,9 @@
 """
-SKATE10 v41 (Polonia) - Arquitectura Híbrida: Investigación en Vivo (Perplexity) + Análisis Cuantitativo (OpenAI)
+SKATE10 v42 (Polonia) - Arquitectura Híbrida: Perplexity Agent API (/v1/responses) + OpenAI
 Adaptado para la TT Elite Series de Polonia (Partidos leídos desde partidos.txt).
 """
 
 import asyncio
-import html
 import json
 import logging
 import os
@@ -15,6 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import requests
 from flask import Flask, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -27,25 +27,15 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 
-# Cliente OpenAI para el análisis matemático y estructuración JSON
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-# Cliente Perplexity (usa el SDK de OpenAI apuntando a la URL oficial de Perplexity)
-pplx_client = (
-    OpenAI(api_key=PERPLEXITY_API_KEY, base_url="https://api.perplexity.ai")
-    if PERPLEXITY_API_KEY
-    else None
-)
-
-POLL_SECONDS = int(os.getenv("POLL_SECONDS", "180"))  # Revisión cada 3 minutos
+POLL_SECONDS = int(os.getenv("POLL_SECONDS", "180"))
 DB_PATH = os.getenv("DB_PATH", "skate10_polonia.db")
 
-# Ventana ideal: enviar entre 35 y 10 minutos antes de iniciar la franja/partido
 LEAD_MIN = 35
 MIN_LEAD_MIN = 10
 
 DAILY_MIN_100 = 4
-STAKE_100_IDEAL = 88
 STAKE_100_MIN = 85
 FRANJA_MIN_PROB = 75
 
@@ -89,7 +79,6 @@ def init_db():
             hit INTEGER, details TEXT, hour_block TEXT)""")
         c.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
 
-        # Migración automática por si la tabla analysis ya existía sin la columna 'prob'
         try:
             c.execute("ALTER TABLE analysis ADD COLUMN prob INTEGER DEFAULT 75")
         except sqlite3.OperationalError:
@@ -116,58 +105,88 @@ def seconds_since_last_100():
         return 999999
 
 
-# ---------------- PASO 1: PERPLEXITY (BÚSQUEDA WEB EN TIEMPO REAL) ----------------
+# ---------------- PASO 1: PERPLEXITY AGENT API (/v1/responses) ----------------
+
+def extraer_texto_perplexity(data: dict) -> str:
+    if isinstance(data.get("output_text"), str) and data["output_text"].strip():
+        return data["output_text"].strip()
+    for item in data.get("output", []):
+        if item.get("type") == "message":
+            for content in item.get("content", []):
+                if content.get("type") in ("output_text", "text") and content.get("text"):
+                    return content["text"].strip()
+    if "choices" in data and data["choices"]:
+        return data["choices"][0].get("message", {}).get("content", "").strip()
+    return ""
+
 
 def investigar_con_perplexity(player1: str, player2: str) -> str:
     """
-    Busca en tiempo real los últimos partidos, forma del día y H2H de ambos jugadores en TT Elite Series (Polonia).
+    Consulta el nuevo endpoint /v1/responses de Perplexity con búsqueda web en tiempo real.
     """
-    if not pplx_client:
+    if not PERPLEXITY_API_KEY:
         log.warning("PERPLEXITY_API_KEY no configurada. Saltando búsqueda web en vivo.")
         return "Sin datos web en tiempo real (API de Perplexity no configurada)."
 
     fecha_hoy = datetime.now(TZ).strftime("%Y-%m-%d")
-    prompt_busqueda = f"""
-Busca información estadística real, actualizada al día de hoy ({fecha_hoy}), sobre el enfrentamiento de tenis de mesa de la TT Elite Series de Polonia entre:
-- Jugador 1: {player1}
-- Jugador 2: {player2}
+    prompt_busqueda = (
+        f"Busca información estadística real, actualizada al día de hoy ({fecha_hoy}), "
+        f"sobre el enfrentamiento de tenis de mesa de la TT Elite Series de Polonia entre {player1} y {player2}. "
+        f"Necesito datos concretos y verificables: "
+        f"1. Resultados de los últimos 5 partidos jugados por {player1} en TT Elite Series (y cómo le fue hoy). "
+        f"2. Resultados de los últimos 5 partidos jugados por {player2} en TT Elite Series (y cómo le fue hoy). "
+        f"3. Historial Head-to-Head (H2H) directo reciente entre {player1} y {player2} y marcadores habituales. "
+        f"4. Racha actual y quién llega con mejor rendimiento. Sé directo y conciso."
+    )
 
-Necesito datos concretos y verificables:
-1. Resultados de los últimos 5 partidos jugados por {player1} en TT Elite Series (incluyendo cómo le ha ido hoy si ya jugó).
-2. Resultados de los últimos 5 partidos jugados por {player2} en TT Elite Series (incluyendo cómo le ha ido hoy si ya jugó).
-3. Historial de enfrentamientos directos (Head-to-Head / H2H) reciente entre {player1} y {player2}, quién domina la serie y marcadores habituales.
-4. Porcentaje de victorias recientes o diferencia de nivel/racha actual.
+    headers = {
+        "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
-Sé directo, conciso y entrega únicamente los datos estadísticos encontrados.
-"""
-    try:
-        response = pplx_client.chat.completions.create(
-            model="sonar",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Eres un investigador deportivo experto en tenis de mesa (TT Elite Series Polonia). Extraes resultados recientes reales, H2H y forma del día desde la web."
-                },
-                {"role": "user", "content": prompt_busqueda}
-            ],
-            temperature=0.1,
-            max_tokens=450
-        )
-        info_web = response.choices[0].message.content.strip()
-        log.info("Perplexity investigó con éxito (TT Elite Polonia): %s vs %s", player1, player2)
-        return info_web
-    except Exception as exc:
-        log.warning("Error consultando Perplexity para %s vs %s: %s", player1, player2, exc)
-        return "No se pudo obtener información en vivo de Perplexity en este intento."
+    # Intento 1: Nuevo endpoint oficial Perplexity Agent API (/v1/responses)
+    payloads = [
+        {
+            "model": "perplexity/sonar",
+            "input": prompt_busqueda,
+            "tools": [{"type": "web_search"}]
+        },
+        {
+            "model": "sonar",
+            "input": prompt_busqueda
+        },
+        {
+            "model": "openai/gpt-5-mini",
+            "input": prompt_busqueda,
+            "tools": [{"type": "web_search"}]
+        }
+    ]
+
+    for payload in payloads:
+        try:
+            resp = requests.post(
+                "https://api.perplexity.ai/v1/responses",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            if resp.status_code == 200:
+                texto = extraer_texto_perplexity(resp.json())
+                if texto:
+                    log.info("Perplexity (/v1/responses) investigó con éxito: %s vs %s", player1, player2)
+                    return texto
+            else:
+                log.debug("Intento Perplexity (%s) devolvió %s: %s", payload.get("model"), resp.status_code, resp.text[:180])
+        except Exception as exc:
+            log.debug("Excepción en intento Perplexity: %s", exc)
+
+    log.warning("No se pudo extraer respuesta de Perplexity /v1/responses para %s vs %s.", player1, player2)
+    return "Usa análisis técnico estadístico de TT Elite Series para este cruce."
 
 
 # ---------------- PASO 2: OPENAI (ANÁLISIS CUANTITATIVO: TT ELITE SERIES) ----------------
 
 def analizar_partido(player1: str, player2: str):
-    """
-    1. Obtiene datos en vivo con Perplexity.
-    2. Pasa esos datos reales a OpenAI para que tome la decisión final y estructure el pick.
-    """
     datos_perplexity = investigar_con_perplexity(player1, player2)
 
     if not openai_client:
@@ -216,12 +235,10 @@ Devuelve estrictamente un JSON válido con esta estructura compacta:
             content = content[3:-3].strip()
 
         data = json.loads(content)
-        fav = str(data.get("fav", player1)).strip()
         prob_p1 = int(data.get("prob_p1", 50))
         prob_p2 = int(data.get("prob_p2", 50))
         rating = float(data.get("rating", 8.0))
 
-        # Garantizar que el nombre del ganador coincida siempre con el de mayor probabilidad
         if prob_p1 >= prob_p2:
             fav = player1
             prob_ganador = prob_p1
@@ -279,7 +296,6 @@ def cargar_partidos_desd_txt():
 
                 match_dt = target_date.replace(hour=h, minute=m, second=0, microsecond=0)
                 ts = int(match_dt.timestamp())
-                # Agrupación por hora en punto (ej. 12:00, 12:20, 12:30 quedan en el bloque "YYYY-MM-DD_12:00")
                 hour_block = f"{target_date.date().isoformat()}_{h:02d}:00"
             except Exception:
                 ts = int(time.time()) + (idx + 1) * 1800
@@ -343,10 +359,7 @@ def format_message(p, flow, mins, prob):
 
 async def send_pick(app, p, flow, mins, prob):
     text = format_message(p, flow, mins, prob)
-
-    keyboard = [
-        [InlineKeyboardButton("📤 Enviar a otros chats", switch_inline_query=text)]
-    ]
+    keyboard = [[InlineKeyboardButton("📤 Enviar a otros chats", switch_inline_query=text)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await app.bot.send_message(
@@ -375,7 +388,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def select_best_pick_for_current_blocks():
     now = int(time.time())
 
-    # 1. Buscar qué franjas horarias tienen partidos próximos a iniciar (entre 10 y 35 min antes)
     with db() as c:
         upcoming_blocks = [
             r["hour_block"] for r in c.execute("""
@@ -387,15 +399,12 @@ def select_best_pick_for_current_blocks():
     if not upcoming_blocks:
         return None, None, 0
 
-    # Filtrar las franjas que aún NO han enviado su pick correspondiente
     pending_blocks = [b for b in upcoming_blocks if not block_already_sent(b)]
     if not pending_blocks:
         return None, None, 0
 
-    # Tomar la franja horaria activa
     target_block = sorted(pending_blocks)[0]
 
-    # 2. Obtener TODOS los partidos futuros de esa franja horaria
     with db() as c:
         block_matches = [dict(r) for r in c.execute("""
             SELECT event_id, player1, player2, start_ts, hour_block
@@ -415,7 +424,6 @@ def select_best_pick_for_current_blocks():
             eid = r["event_id"]
             an = c.execute("SELECT fav, rating, prob, details FROM analysis WHERE event_id=?", (eid,)).fetchone()
             if not an:
-                # Perplexity busca en la web -> OpenAI analiza
                 fav, rating, prob_ganador, details = analizar_partido(r["player1"], r["player2"])
                 c.execute("""INSERT OR REPLACE INTO analysis(event_id, fav, rating, prob, quality, details, analyzed_at) 
                              VALUES (?,?,?,?,?,?,?)""",
@@ -440,11 +448,9 @@ def select_best_pick_for_current_blocks():
         log.info("Ningún partido de la franja %s superó el %d%% requerido.", target_block, FRANJA_MIN_PROB)
         return None, None, 0
 
-    # 3. Elegir el MEJOR partido de toda la franja horaria
     analyzed_rows.sort(key=lambda x: (x["prob"], x["rating"]), reverse=True)
     best_match = analyzed_rows[0]
 
-    # 4. Verificar si califica para STAKE 100 (cada 2 horas y >= 85% de probabilidad)
     sent_today = count_100_today()
     can_send_100 = seconds_since_last_100() >= 2 * 3600
     flow = "normal"
@@ -491,12 +497,12 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    pplx_ok = "✅ Conectada" if pplx_client else "⚠️ Sin API Key"
+    pplx_ok = "✅ Conectada" if PERPLEXITY_API_KEY else "⚠️ Sin API Key"
     oai_ok = "✅ Conectada" if openai_client else "⚠️ Sin API Key"
     await update.message.reply_text(
         f"✅ SKATE10 TT Elite Series operativo.\n"
         f"Hora Colombia: {datetime.now(TZ).strftime('%I:%M %p')}\n"
-        f"Perplexity Web: {pplx_ok}\n"
+        f"Perplexity Web (/v1/responses): {pplx_ok}\n"
         f"OpenAI Análisis: {oai_ok}"
     )
 
@@ -544,7 +550,7 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 @web.get("/")
 def home():
-    return "SKATE10 v41 (TT Elite Series Polonia) Activo - Perplexity + OpenAI", 200
+    return "SKATE10 v42 (TT Elite Series Polonia) Activo - Perplexity + OpenAI", 200
 
 
 @web.get("/health")
@@ -568,7 +574,6 @@ def main():
     init_db()
     threading.Thread(target=run_web, daemon=True).start()
 
-    # Crear y asignar explícitamente el event loop para compatibilidad con Python 3.12 / 3.14 en Render
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -580,7 +585,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    log.info("Iniciando SKATE10 v41 TT Elite Series (Perplexity + OpenAI)...")
+    log.info("Iniciando SKATE10 v42 TT Elite Series (Perplexity /v1/responses + OpenAI)...")
     app.run_polling(drop_pending_updates=True)
 
 
