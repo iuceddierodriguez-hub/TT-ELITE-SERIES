@@ -564,9 +564,14 @@ async def post_init(application: Application):
 
 def main():
     if not TOKEN or not CHAT_ID:
-        raise RuntimeError("Faltan variables de entorno esenciales.")
+        raise RuntimeError("Faltan variables de entorno esenciales (TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID).")
     init_db()
     threading.Thread(target=run_web, daemon=True).start()
+
+    # Crear y asignar explícitamente el event loop para compatibilidad con Python 3.12 / 3.14 en Render
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     for name, fn in [("start", cmd_start), ("test", cmd_test), ("estado", cmd_estado),
