@@ -473,4 +473,203 @@ def format_message(p, flow, mins, prob):
         clean_details = clean_details.replace("Favorito Perplexity:", "Favorito 1:").replace("Favorito OpenAI:", "Favorito 2:")
         if "\nArgumentos:" in clean_details and "\n\nArgumentos:" not in clean_details:
             clean_details = clean_details.replace("\nArgumentos:", "\n\nArgumentos:")
-        lin
+        lines += ["", "", clean_details]
+
+    return "\n".join(lines)
+
+
+async def send_pick(app, p, flow, mins, prob):
+    text = format_message(p, flow, mins, prob)
+    keyboard = [[InlineKeyboardButton("📤 Enviar a otros chats", switch_inline_query=text)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    for cid in get_all_chat_ids():
+        try:
+            await app.bot.send_message(
+                chat_id=cid,
+                text=text,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                reply_markup=reply_markup
+            )
+        except Exception as exc:
+            log.warning("No se pudo enviar al chat %s: %s", cid, exc)
+
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data.startswith("enviar_pick_"):
+        await query.edit_message_reply_markup(reply_markup=None)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="✅ <b>¡Pick TT Elite listo!</b>",
+            parse_mode="HTML"
+        )
+
+
+async def run_cycle(app):
+    await asyncio.to_thread(fetch_fixtures_only)
+    await asyncio.to_thread(resolve_results)
+
+    best_p, flow, prob = await asyncio.to_thread(select_best_pick_for_current_blocks)
+    if best_p and get_all_chat_ids():
+        mins = (best_p["start_ts"] - time.time()) / 60
+        await send_pick(app, best_p, flow, mins, prob)
+
+        with db() as c:
+            c.execute("""INSERT OR IGNORE INTO picks
+                (event_id, flow, rating, fav, player1, player2, start_ts, sent_at, details, hour_block)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (best_p["event_id"], flow, best_p["rating"], best_p["fav"], best_p["player1"],
+                 best_p["player2"], best_p["start_ts"], int(time.time()), best_p["details"], best_p["hour_block"]))
+
+        log.info("Pick TT Elite enviado -> Bloque 30m: %s | Flujo: %s | Ganador: %s (%d%%)",
+                 best_p["hour_block"], flow, best_p["fav"], prob)
+
+
+async def monitor_loop(app: Application):
+    while True:
+        try:
+            await run_cycle(app)
+        except Exception as exc:
+            log.error("Fallo en bucle TT Elite: %s", str(exc)[:300])
+        await asyncio.sleep(POLL_SECONDS)
+
+
+# ---------------- COMANDOS TELEGRAM ----------------
+
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🏓 TT Elite Series v57 Activo.\n"
+        "/activar_grupo · /id · /estado · /resumen · /partidos · /test"
+    )
+
+
+async def cmd_id(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cid = str(update.effective_chat.id)
+    await update.message.reply_text(
+        f"🆔 <b>El ID de este chat/grupo es:</b>\n<code>{cid}</code>\n\n"
+        f"💡 Si quieres que envíe los picks aquí automáticamente, escribe /activar_grupo",
+        parse_mode="HTML"
+    )
+
+
+async def cmd_activar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    init_db()
+    cid = str(update.effective_chat.id)
+    with db() as c:
+        c.execute("INSERT OR IGNORE INTO extra_chats(chat_id) VALUES (?)", (cid,))
+    await update.message.reply_text(
+        f"✅ <b>¡Grupo vinculado con éxito a TT Elite Series!</b>\n"
+        f"🆔 ID registrado: <code>{cid}</code>\n"
+        f"A partir de ahora recibirás aquí todos los picks al mismo tiempo que en tu chat privado.",
+        parse_mode="HTML"
+    )
+
+
+async def cmd_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    pplx_ok = "✅ Conectada" if PERPLEXITY_API_KEY else "⚠️ Sin API Key"
+    oai_ok = "✅ Conectada" if openai_client else "⚠️ Sin API Key"
+    destinos = ", ".join(get_all_chat_ids())
+    await update.message.reply_text(
+        f"✅ TT Elite Series v57 Operativo (Polonia - 2 Mensajes).\n"
+        f"📡 Chats activos: {destinos}\n"
+        f"🚨 Stake 100 de Acierto: Estricto >= {STAKE_ACIERTO_MIN}%\n"
+        f"🏓 Pick Media Hora: Estricto >= {FRANJA_MIN_PROB}% (78% a 88%)\n"
+        f"🔍 Factores: H2H + Racha + Carga de partidos + Desplazamiento\n"
+        f"Perplexity: {pplx_ok} | OpenAI: {oai_ok}"
+    )
+
+
+async def cmd_estado(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    init_db()
+    with db() as c:
+        n_fix = c.execute("SELECT COUNT(*) FROM fixtures WHERE start_ts>?", (int(time.time()),)).fetchone()[0]
+    await update.message.reply_text(
+        f"🟢 Estado TT Elite Series (Franjas 30 min)\n"
+        f"Partidos futuros: {n_fix}\n"
+        f"Stakes de Acierto (>=89%) enviados hoy: {count_acierto_today()}\n"
+        f"Destinos configurados: {len(get_all_chat_ids())}"
+    )
+
+
+async def cmd_resumen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    init_db()
+    with db() as c:
+        rows = c.execute("""SELECT flow, CAST(ROUND(rating) AS INT) AS r, COUNT(*) AS n, SUM(hit) AS h
+            FROM picks WHERE hit IS NOT NULL GROUP BY flow, r ORDER BY flow, r DESC""").fetchall()
+        pend = c.execute("SELECT COUNT(*) FROM picks WHERE hit IS NULL").fetchone()[0]
+    if not rows:
+        await update.message.reply_text(f"Sin pronósticos resueltos. Pendientes: {pend}")
+        return
+    lines = ["📈 Rendimiento TT Elite"] + [f"• {r['flow']} · nota {r['r']}: {r['h']}/{r['n']} ({100 * r['h'] / r['n']:.0f}%)" for r in rows]
+    await update.message.reply_text("\n".join(lines + [f"Pendientes: {pend}"]))
+
+
+async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    init_db()
+    now = int(time.time())
+    with db() as c:
+        rows = c.execute("""SELECT player1, player2, start_ts, hour_block
+            FROM fixtures WHERE start_ts >= ? ORDER BY start_ts LIMIT 15""",
+            (now,)).fetchall()
+
+    if not rows:
+        await update.message.reply_text("Sin partidos programados.")
+        return
+
+    lines = [f"📋 <b>Cartelera TT Elite Próxima (Franjas de 30m):</b>"]
+    for r in rows:
+        hh = datetime.fromtimestamp(r["start_ts"], TZ).strftime("%I:%M %p")
+        lines.append(f"• <b>{hh}</b> | Blq: {r['hour_block']} | {r['player1']} vs {r['player2']}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+# ---------------- WEB (Render - Servidor directo con puerto dinámico) ----------------
+
+@web.get("/")
+def home():
+    return "TT Elite v57 Activo", 200
+
+
+@web.get("/health")
+def health():
+    return jsonify({"status": "ok", "uptime_seconds": int(time.time() - started_at)}), 200
+
+
+def run_web():
+    port = int(os.getenv("PORT", "10000"))
+    web.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+
+async def post_init(application: Application):
+    await asyncio.to_thread(fetch_fixtures_only)
+    application.create_task(monitor_loop(application))
+
+
+def main():
+    if not TOKEN or not CHAT_ID:
+        raise RuntimeError("Faltan variables esenciales (TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID).")
+    init_db()
+    
+    # Arranca Flask en segundo plano para abrir el puerto web de Render de inmediato
+    threading.Thread(target=run_web, daemon=True).start()
+    
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    for name, fn in [
+        ("start", cmd_start), ("id", cmd_id), ("activar_grupo", cmd_activar_grupo),
+        ("test", cmd_test), ("estado", cmd_estado), ("resumen", cmd_resumen), ("partidos", cmd_partidos)
+    ]:
+        app.add_handler(CommandHandler(name, fn))
+
+    app.add_handler(CallbackQueryHandler(button_callback))
+
+    log.info("Iniciando TT Elite v57 (Media Hora >=78%% | Acierto >=89%%)...")
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()
