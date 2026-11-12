@@ -1,5 +1,5 @@
 """
-TT Elite Series v57.6 (POLONIA) - Corrección de Sintaxis Menú /start y /partidos
+TT Elite Series v57.7 (POLONIA) - Perplexity /v1/responses + Menú Completo + Selección Inteligente
 Pick Media Hora (>= 78%) | Stake 100 / Acierto Total (>= 89%) | Multi-Chat (/activar_grupo)
 """
 
@@ -30,7 +30,7 @@ PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "120"))
-DB_PATH = os.getenv("DB_PATH", "tt_elite_v576.db")
+DB_PATH = os.getenv("DB_PATH", "tt_elite_v577.db")
 
 LEAD_MIN = 35
 MIN_LEAD_MIN = 5
@@ -108,7 +108,7 @@ def block_already_sent(hour_block):
         return row[0] > 0 if row else False
 
 
-# ---------------- PASO 1: PERPLEXITY (CORREGIDO CON CHAT/COMPLETIONS) ----------------
+# ---------------- PASO 1: PERPLEXITY (AGENT API /v1/responses) ----------------
 
 def investigar_con_perplexity(player1: str, player2: str) -> str:
     if not PERPLEXITY_API_KEY:
@@ -118,7 +118,7 @@ def investigar_con_perplexity(player1: str, player2: str) -> str:
     fecha_hoy = datetime.now(TZ).strftime("%Y-%m-%d")
 
     prompt_busqueda = (
-        f"Busca en Sofascore, AiScore, Betano, Tips Manager y Flashscore los partidos, "
+        f"Busca obligatoriamente en Sofascore, AiScore, Betano, Tips Manager y Flashscore los partidos, "
         f"enfrentamientos directos (H2H) y rachas recientes de tenis de mesa para {player1} y {player2} hoy ({fecha_hoy}). "
         f"Extrae datos numéricos y estadísticas de ambos jugadores en la TT Elite Series Polonia."
     )
@@ -130,25 +130,33 @@ def investigar_con_perplexity(player1: str, player2: str) -> str:
 
     payload = {
         "model": "sonar-pro",
-        "messages": [
-            {"role": "system", "content": "Eres un asistente experto en investigación de estadísticas deportivas."},
-            {"role": "user", "content": prompt_busqueda}
-        ],
-        "temperature": 0.1
+        "input": prompt_busqueda,
+        "tools": [{"type": "web_search"}]
     }
 
     try:
         resp = requests.post(
-            "https://api.perplexity.ai/chat/completions",
+            "https://api.perplexity.ai/v1/responses",
             headers=headers,
             json=payload,
             timeout=38
         )
         if resp.status_code == 200:
             data = resp.json()
-            texto = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            texto = ""
+            if isinstance(data.get("output_text"), str) and data["output_text"].strip():
+                texto = data["output_text"].strip()
+            elif "output" in data:
+                for item in data.get("output", []):
+                    if item.get("type") == "message":
+                        for content in item.get("content", []):
+                            if content.get("type") in ("output_text", "text") and content.get("text"):
+                                texto = content["text"].strip()
+            if not texto and "choices" in data:
+                texto = data["choices"][0].get("message", {}).get("content", "").strip()
+
             if texto and len(texto) > 30:
-                log.info("Perplexity investigó con éxito: %s vs %s", player1, player2)
+                log.info("Perplexity investigó con éxito vía /v1/responses: %s vs %s", player1, player2)
                 return texto
         else:
             log.warning("Perplexity HTTP error: %s - %s", resp.status_code, resp.text)
@@ -559,7 +567,7 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 @web.get("/")
 def home():
-    return "TT Elite v57.6 Activo", 200
+    return "TT Elite v57.7 Activo", 200
 
 
 @web.get("/health")
@@ -594,7 +602,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    log.info("Iniciando TT Elite v57.6 con Sintaxis Corregida...")
+    log.info("Iniciando TT Elite v57.7 con /v1/responses...")
     app.run_polling(drop_pending_updates=True)
 
 
