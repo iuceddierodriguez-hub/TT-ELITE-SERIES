@@ -1,5 +1,5 @@
 """
-TT Elite Series v57 (POLONIA) - 2 Mensajes Exclusivos + Auditoría de 4 Pilares (H2H, Racha, Carga y Desplazamiento)
+TT Elite Series v57.3 (POLONIA) - Búsqueda en Cascada (Si un partido no hay datos web, salta al siguiente)
 Pick Media Hora (>= 78%) | Stake 100 / Acierto Total (>= 89%) | Multi-Chat (/activar_grupo)
 """
 
@@ -30,7 +30,7 @@ PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "120"))
-DB_PATH = os.getenv("DB_PATH", "tt_elite_v57.db")
+DB_PATH = os.getenv("DB_PATH", "tt_elite_v573.db")
 
 LEAD_MIN = 35
 MIN_LEAD_MIN = 5
@@ -108,7 +108,7 @@ def block_already_sent(hour_block):
         return row[0] > 0 if row else False
 
 
-# ---------------- PASO 1: PERPLEXITY (H2H + RACHA + CARGA Y DESPLAZAMIENTO) ----------------
+# ---------------- PASO 1: PERPLEXITY (SOFAScore, AiScore, Tips Manager y 4 Pilares) ----------------
 
 def extraer_texto_perplexity(data: dict) -> str:
     if isinstance(data.get("output_text"), str) and data["output_text"].strip():
@@ -131,14 +131,14 @@ def investigar_con_perplexity(player1: str, player2: str) -> str:
     fecha_hoy = datetime.now(TZ).strftime("%Y-%m-%d")
 
     prompt_busqueda = (
-        f"Busca información estadística rigurosa y verificada en la web (Sofascore, Flashscore, BetsAPI, TT Elite Series Polonia) "
-        f"sobre el partido de tenis de mesa entre {player1} y {player2} a fecha de hoy ({fecha_hoy}). "
-        f"Investiga y detalla obligatoriamente estos 4 puntos clave:\n"
-        f"1. HISTORIAL H2H COMPLETO: Registro histórico de enfrentamientos directos entre {player1} y {player2}, y marcadores exactos de sus últimos 5 duelos directos.\n"
-        f"2. RENDIMIENTO Y RACHA ACTUAL: Marcadores exactos y récord de victorias/derrotas de {player1} y de {player2} en sus últimos 5 a 10 partidos jugados.\n"
-        f"3. CARGA DE PARTIDOS Y FATIGA RECIENTE: Cuántos partidos ha jugado cada uno en las últimas 24 horas, si vienen de partidos largos a 5 sets (3-2) y cuánto descanso tienen entre turnos.\n"
-        f"4. DESPLAZAMIENTO Y CAMBIO DE SEDE/TORNEO: Verifica en qué ciudad/sala o grupo viene jugando cada uno recientemente y si alguno tuvo que desplazarse de otra sede o cambiar de horario drásticamente.\n"
-        f"5. VEREDICTO DE PERPLEXITY: Basado en H2H, forma actual y desgaste físico/viajes, indica quién es el favorito real y con qué porcentaje."
+        f"Busca obligatoriamente en fuentes web deportivas como Sofascore, AiScore, Tips Manager, Flashscore o la web oficial de la TT Elite Series Polonia "
+        f"información estadística rigurosa sobre el partido de tenis de mesa entre {player1} y {player2} a fecha de hoy ({fecha_hoy}). "
+        f"Si no encuentras datos reales y verificables en la web sobre estos jugadores, responde estrictamente con la frase 'SIN DATOS REALES'. "
+        f"Si los encuentras, investiga y detalla obligatoriamente:\n"
+        f"1. HISTORIAL H2H COMPLETO: Registro histórico de enfrentamientos directos y marcadores exactos de sus últimos duelos.\n"
+        f"2. RENDIMIENTO Y RACHA ACTUAL: Récord de victorias/derrotas de {player1} y {player2} en sus últimos partidos.\n"
+        f"3. CARGA DE PARTIDOS Y FATIGA: Cuántos partidos ha jugado cada uno hoy o en las últimas 24 horas y desgaste físico.\n"
+        f"4. DESPLAZAMIENTO Y SEDE: Sede o grupo en el que compiten."
     )
 
     headers = {
@@ -162,8 +162,8 @@ def investigar_con_perplexity(player1: str, player2: str) -> str:
             )
             if resp.status_code == 200:
                 texto = extraer_texto_perplexity(resp.json())
-                if texto:
-                    log.info("Perplexity investigó (TT Elite Polonia): %s vs %s", player1, player2)
+                if texto and "sin datos reales" not in texto.lower():
+                    log.info("Perplexity investigó con éxito (TT Elite Polonia): %s vs %s", player1, player2)
                     return texto
         except Exception as exc:
             log.debug("Excepción en Perplexity: %s", exc)
@@ -171,44 +171,36 @@ def investigar_con_perplexity(player1: str, player2: str) -> str:
     return "SIN_DATOS"
 
 
-# ---------------- PASO 2: OPENAI (AUDITORÍA RIGUROSA 4 PILARES) ----------------
+# ---------------- PASO 2: OPENAI (AUDITORÍA RIGUROSA) ----------------
 
 def analizar_partido(player1: str, player2: str):
     datos_perplexity = investigar_con_perplexity(player1, player2)
 
     if not openai_client or datos_perplexity == "SIN_DATOS":
+        log.info("❌ Sin datos reales web para TT Elite: %s vs %s (Descartado para cascada)", player1, player2)
         return "NINGUNO", 5.0, 50, "Sin datos verificables."
 
     prompt_analisis = f"""
-Eres un auditor cuantitativo implacable de tenis de mesa profesional (TT Elite Series Polonia).
-Abajo tienes el reporte de Perplexity para el duelo entre "{player1}" y "{player2}".
+Eres un auditor cuantitativo de tenis de mesa (TT Elite Series Polonia).
+Analiza el reporte de Perplexity (extraído de Sofascore, AiScore, Tips Manager, etc.) para el duelo entre "{player1}" y "{player2}".
 
-CRITERIOS OBLIGATORIOS DE AUDITORÍA (MUCHA RIGUROSIDAD):
-1. HISTORIAL H2H DIRECTO (Peso 40%): Revisa quién domina históricamente y en los últimos enfrentamientos directos. Si un jugador tiene paternidad clara (ej. 4-1, 5-1, 3-0 seguido), tiene gran ventaja psicológica y táctica.
-2. RENDIMIENTO Y FORMA RECIENTE (Peso 35%): Evalúa cómo vienen jugando en sus últimos 5-10 partidos. Un jugador con racha perdedora (ej. 1-4 o 2-3) NO puede recibir probabilidades altas.
-3. CARGA DE PARTIDOS, FATIGA Y DESPLAZAMIENTOS (Peso 25%):
-   - Penaliza severamente al jugador que tenga sobrecarga de partidos hoy (fatiga acumulada, varios duelos a 5 sets) o que haya tenido que desplazarse entre sedes/ciudades o cambiar de turno sin descanso.
-   - Premia al jugador que llega más fresco, adaptado a la mesa/sede y con menor desgaste físico.
-
-ESCALA ESTRICTA DE PROBABILIDADES (PROHIBIDO REGALAR PORCENTAJES ALTOS):
-- Si no hay datos reales verificables en el reporte, pon `"datos_reales": false` y `"prob_ganador": 50`.
-- 50% a 77% (DESCARTADO): Partidos parejos, H2H dividido (ej. 2-2, 3-2), rachas irregulares o donde el favorito técnico llega muy cansado por carga de partidos/viaje.
-- 78% a 88% (PICK DE MEDIA HORA): Favorito sólido que gana tanto en H2H como en forma reciente y no presenta desventaja por fatiga.
-- 89% a 96% (STAKE 100 / ACIERTO TOTAL - ULTRA EXCLUSIVO): SOLO cuando los 4 factores están alineados al 100% a favor del mismo jugador: paternidad aplastante en H2H + racha ganadora actual muy superior + rival con peor forma o mayor desgaste/carga de partidos. Sé extremadamente selectivo para dar >= 89%.
+CRITERIOS OBLIGATORIOS:
+- Si el reporte indica que no hay datos o carece de información contrastada, pon `"datos_reales": false` y `"prob_ganador": 50`.
+- REGLA ESTRICTA: Prohibido inventar datos. Si no hay estadísticas fiables, descarta poniendo 50%.
 
 REPORTE DE PERPLEXITY:
 \"\"\"
 {datos_perplexity}
 \"\"\"
 
-Devuelve estrictamente este JSON válido (sin inflar números):
+Devuelve estrictamente este JSON válido:
 {{
   "datos_reales": true,
-  "ganador_perplexity": "Nombre del jugador que Perplexity vio mejor",
+  "ganador_perplexity": "Nombre del jugador visto mejor",
   "ganador_openai": "Nombre exacto del ganador tras tu auditoría ('{player1}' o '{player2}')",
   "prob_ganador": 50,
   "rating": 5.0,
-  "resumen": "Detalla explícitamente: 1) El historial H2H exacto, 2) La racha reciente de ambos con cifras, y 3) El análisis de carga de partidos/desgaste o desplazamiento que respalda el porcentaje asignado.",
+  "resumen": "Resumen basado estrictamente en H2H, racha y carga encontrados.",
   "value_bet": "Sí / No"
 }}
 """
@@ -231,8 +223,7 @@ Devuelve estrictamente este JSON válido (sin inflar números):
 
         frases_sin_datos = ("falta de datos", "falta de información", "no se encontraron", "sin datos específicos", "no hay información")
         if not datos_reales or any(f in resumen.lower() for f in frases_sin_datos):
-            log.info("❌ Descartado por falta de datos: %s vs %s", player1, player2)
-            return "NINGUNO", 5.0, 50, "Sin estadísticas verificables."
+            return "NINGUNO", 5.0, 50, "Descartado por falta de estadísticas reales."
 
         ganador_raw = str(data.get("ganador_openai", "")).strip()
         ganador_pplx = str(data.get("ganador_perplexity", "")).strip()
@@ -251,27 +242,21 @@ Devuelve estrictamente este JSON válido (sin inflar números):
 
         if player2.lower() in ganador_raw.lower() and player1.lower() not in ganador_raw.lower():
             fav = player2
-            prob_p1 = prob_perdedor
-            prob_p2 = prob_ganador
+            prob_p1, prob_p2 = prob_perdedor, prob_ganador
         elif player1.lower() in ganador_raw.lower() and player2.lower() not in ganador_raw.lower():
             fav = player1
-            prob_p1 = prob_ganador
-            prob_p2 = prob_perdedor
+            prob_p1, prob_p2 = prob_ganador, prob_perdedor
         else:
             p1_apellido = player1.split()[0].lower()
             p2_apellido = player2.split()[0].lower()
             if p2_apellido in ganador_raw.lower():
                 fav = player2
-                prob_p1 = prob_perdedor
-                prob_p2 = prob_ganador
+                prob_p1, prob_p2 = prob_perdedor, prob_ganador
             else:
                 fav = player1
-                prob_p1 = prob_ganador
-                prob_p2 = prob_perdedor
+                prob_p1, prob_p2 = prob_ganador, prob_perdedor
 
-        # REGLA ADICIONAL DE RIGUROSIDAD: Si Perplexity y OpenAI NO coinciden en el ganador, no puede ser Stake de Acierto (>=89%)
         if ganador_pplx and (fav.split()[0].lower() not in ganador_pplx.lower()) and prob_ganador >= STAKE_ACIERTO_MIN:
-            log.info("⚠️ Discrepancia entre Perplexity (%s) y OpenAI (%s). Se ajusta probabilidad de %d%% a 82%%.", ganador_pplx, fav, prob_ganador)
             prob_ganador = 82
             prob_perdedor = 18
             if fav == player1:
@@ -287,7 +272,7 @@ Devuelve estrictamente este JSON válido (sin inflar números):
             f"Argumentos: {resumen}\n"
             f"Value Bet: {value_bet}"
         )
-        log.info("🎯 Consenso TT Elite: %s vs %s -> Ganador: %s (%d%%)", player1, player2, fav, prob_ganador)
+        log.info("🎯 Partido TT Elite válido: %s vs %s -> Ganador: %s (%d%%)", player1, player2, fav, prob_ganador)
         return fav, rating, prob_ganador, details
 
     except Exception as exc:
@@ -295,7 +280,7 @@ Devuelve estrictamente este JSON válido (sin inflar números):
         return "NINGUNO", 5.0, 50, "Error de análisis."
 
 
-# ---------------- CARGA DE PARTIDOS (BLOQUES DE 30 MINUTOS) ----------------
+# ---------------- CARGA DE PARTIDOS ----------------
 
 def cargar_partidos_desde_txt():
     archivo = "partidos.txt"
@@ -355,7 +340,7 @@ def fetch_fixtures_only():
             c.execute("""INSERT OR REPLACE INTO fixtures(event_id, player1, player2, start_ts, hour_block) 
                         VALUES (?,?,?,?,?)""",
                       (it["id"], it["player1"], it["player2"], it["timestamp"], it["hour_block"]))
-    log.info("Cartelera TT Elite cargada: %s eventos (Franjas de 30 minutos).", len(items))
+    log.info("Cartelera TT Elite cargada: %s eventos.", len(items))
 
 
 def resolve_results():
@@ -368,7 +353,7 @@ def resolve_results():
             c.execute("UPDATE picks SET hit=1 WHERE event_id=?", (r["event_id"],))
 
 
-# ---------------- SELECCIÓN ESTRICTA (SOLO 2 FLUJOS: MEDIA HORA >=78% Y ACIERTO >=89%) ----------------
+# ---------------- SELECCIÓN EN CASCADA (PRUEBA PARTIDO POR PARTIDO HASTA HALLAR UNO VÁLIDO) ----------------
 
 def select_best_pick_for_current_blocks():
     init_db()
@@ -402,7 +387,7 @@ def select_best_pick_for_current_blocks():
     if not block_matches:
         return None, None, 0
 
-    log.info("Evaluando bloque TT Elite de MEDIA HORA %s (%d partidos)...", target_block, len(block_matches))
+    log.info("Evaluando bloque TT Elite %s (%d partidos disponibles)...", target_block, len(block_matches))
 
     valid_analyzed = []
     with db() as c:
@@ -431,7 +416,10 @@ def select_best_pick_for_current_blocks():
                 })
 
     if not valid_analyzed:
-        log.info("🛑 Ningún partido TT Elite del bloque %s alcanzó el mínimo estricto de %d%%.", target_block, FRANJA_MIN_PROB)
+        log.info("🛑 Ningún partido TT Elite del bloque %s tenía estadísticas web reales. Saltando bloque.", target_block)
+        with db() as c:
+            c.execute("INSERT OR IGNORE INTO picks(event_id, hour_block, sent_at) VALUES (?,?,?)", 
+                      (f"empty_{target_block}", target_block, now))
         return None, None, 0
 
     valid_analyzed.sort(key=lambda x: (x["prob"], x["rating"]), reverse=True)
@@ -440,10 +428,10 @@ def select_best_pick_for_current_blocks():
 
     if best_prob >= STAKE_ACIERTO_MIN:
         flow = "acierto"
-        log.info("🚨🔥 STAKE DE ACIERTO TOTAL DETECTADO (>= %d%%) -> %s (%d%%)", STAKE_ACIERTO_MIN, best_match["fav"], best_prob)
+        log.info("🚨🔥 STAKE 100 TT ELITE VERIFICADO CON DATOS REALES (>= %d%%) -> %s (%d%%)", STAKE_ACIERTO_MIN, best_match["fav"], best_prob)
     else:
         flow = "normal"
-        log.info("🏓 MEJOR DE LA MEDIA HORA DETECTADO -> %s (%d%%)", best_match["fav"], best_prob)
+        log.info("🏓 PICK MEDIA HORA CASCADA TT ELITE VÁLIDO -> %s (%d%%)", best_match["fav"], best_prob)
 
     return best_match, flow, best_prob
 
@@ -524,7 +512,7 @@ async def run_cycle(app):
                 (best_p["event_id"], flow, best_p["rating"], best_p["fav"], best_p["player1"],
                  best_p["player2"], best_p["start_ts"], int(time.time()), best_p["details"], best_p["hour_block"]))
 
-        log.info("Pick TT Elite enviado -> Bloque 30m: %s | Flujo: %s | Ganador: %s (%d%%)",
+        log.info("Pick TT Elite enviado en cascada -> Bloque 30m: %s | Flujo: %s | Ganador: %s (%d%%)",
                  best_p["hour_block"], flow, best_p["fav"], prob)
 
 
@@ -541,7 +529,7 @@ async def monitor_loop(app: Application):
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🏓 TT Elite Series v57 Activo.\n"
+        "🏓 TT Elite Series v57.3 Cascada Activo.\n"
         "/activar_grupo · /id · /estado · /resumen · /partidos · /test"
     )
 
@@ -573,12 +561,11 @@ async def cmd_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     oai_ok = "✅ Conectada" if openai_client else "⚠️ Sin API Key"
     destinos = ", ".join(get_all_chat_ids())
     await update.message.reply_text(
-        f"✅ TT Elite Series v57 Operativo (Polonia - 2 Mensajes).\n"
+        f"✅ TT Elite Series v57.3 Operativo con Cascada (Polonia).\n"
         f"📡 Chats activos: {destinos}\n"
         f"🚨 Stake 100 de Acierto: Estricto >= {STAKE_ACIERTO_MIN}%\n"
         f"🏓 Pick Media Hora: Estricto >= {FRANJA_MIN_PROB}% (78% a 88%)\n"
-        f"🔍 Factores: H2H + Racha + Carga de partidos + Desplazamiento\n"
-        f"Perplexity: {pplx_ok} | OpenAI: {oai_ok}"
+        f"Perplexity (Sofascore/AiScore/Tips Manager): {pplx_ok} | OpenAI: {oai_ok}"
     )
 
 
@@ -627,11 +614,11 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
-# ---------------- WEB (Render - Servidor directo con puerto dinámico) ----------------
+# ---------------- WEB (Render) ----------------
 
 @web.get("/")
 def home():
-    return "TT Elite v57 Activo", 200
+    return "TT Elite v57.3 Activo", 200
 
 
 @web.get("/health")
@@ -654,7 +641,6 @@ def main():
         raise RuntimeError("Faltan variables esenciales (TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID).")
     init_db()
     
-    # Arranca Flask en segundo plano para abrir el puerto web de Render de inmediato
     threading.Thread(target=run_web, daemon=True).start()
     
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
@@ -667,7 +653,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    log.info("Iniciando TT Elite v57 (Media Hora >=78%% | Acierto >=89%%)...")
+    log.info("Iniciando TT Elite v57.3 con Cascada Web...")
     app.run_polling(drop_pending_updates=True)
 
 
