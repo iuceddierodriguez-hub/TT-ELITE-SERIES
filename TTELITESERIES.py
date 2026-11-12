@@ -1,5 +1,5 @@
 """
-TT Elite Series v57.5 (POLONIA) - Búsqueda Correcta Perplexity + Menú /start Completo
+TT Elite Series v57.6 (POLONIA) - Corrección de Sintaxis Menú /start y /partidos
 Pick Media Hora (>= 78%) | Stake 100 / Acierto Total (>= 89%) | Multi-Chat (/activar_grupo)
 """
 
@@ -30,7 +30,7 @@ PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "120"))
-DB_PATH = os.getenv("DB_PATH", "tt_elite_v575.db")
+DB_PATH = os.getenv("DB_PATH", "tt_elite_v576.db")
 
 LEAD_MIN = 35
 MIN_LEAD_MIN = 5
@@ -552,7 +552,6 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     for r in rows:
         hh = datetime.fromtimestamp(r["start_ts"], TZ).strftime("%I:%M %p")
         lines.append(f"• <b>{hh}</b> | Blq: {r['hour_block']} | {r['player1']} vs {r['player2']}")
-    await update.main_reply_text = "\n".join(lines) if hasattr(update, 'main_reply_text') else None
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
@@ -560,7 +559,7 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 @web.get("/")
 def home():
-    return "TT Elite v57.5 Activo", 200
+    return "TT Elite v57.6 Activo", 200
 
 
 @web.get("/health")
@@ -595,7 +594,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    log.info("Iniciando TT Elite v57.5 con Menú y Perplexity Corregido...")
+    log.info("Iniciando TT Elite v57.6 con Sintaxis Corregida...")
     app.run_polling(drop_pending_updates=True)
 
 
