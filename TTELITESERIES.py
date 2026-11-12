@@ -1,25 +1,12 @@
 """
 TT ELITE SERIES - BOT DE ANALISIS INFORMATIVO
-- Revisa la cartelera de partidos.txt cada 30 minutos.
+- Revisa la cartelera de partidos.txt por bloques de 30 minutos.
 - Perplexity busca resultados recientes y H2H con fuentes web.
 - Python calcula WR5, WR10 y H2H a partir de los datos recuperados.
 - OpenAI analiza exclusivamente esas estadísticas.
-- Solo muestra un favorito informativo si Perplexity y OpenAI coinciden.
+- Selecciona el mejor partido del bloque y envía un único informe.
 - No inventa resultados, porcentajes ni fuentes. Si faltan datos, lo informa.
 - No incluye stakes ni instrucciones de apuestas.
-
-Formato de partidos.txt:
-12:00|Jugador A vs Jugador B
-12:30|Jugador C vs Jugador D
-
-Variables de entorno:
-TELEGRAM_BOT_TOKEN
-TELEGRAM_CHAT_ID
-PERPLEXITY_API_KEY
-OPENAI_API_KEY
-OPENAI_MODEL (opcional, por defecto gpt-4o-mini)
-DB_PATH (opcional)
-POLL_SECONDS (opcional, por defecto 60)
 """
 
 import asyncio
@@ -52,8 +39,6 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 
 DB_PATH = os.getenv("DB_PATH", "tt_elite_analisis.db")
 POLL_SECONDS = max(30, int(os.getenv("POLL_SECONDS", "60")))
-LEAD_MINUTES = 35
-MIN_LEAD_MINUTES = 3
 MIN_MATCHES_PER_PLAYER = 3
 
 logging.basicConfig(
@@ -124,7 +109,6 @@ def normalize(value):
 
 
 def player_match(value, player1, player2):
-    """Relaciona un nombre con uno de los jugadores solo si no hay ambiguedad."""
     n = normalize(value)
     a = normalize(player1)
     b = normalize(player2)
@@ -176,10 +160,6 @@ def valid_date(value):
 
 
 def clean_matches(items, citation_urls):
-    """
-    Acepta solo registros con fecha, rival, resultado booleano y URL incluida
-    entre las citas que devolvio Perplexity.
-    """
     allowed = set(citation_urls or [])
     cleaned = []
     seen = set()
@@ -270,7 +250,6 @@ def load_fixtures():
                 log.warning("Hora invalida en linea %s: %s", line_no, time_text)
                 continue
 
-            target_day = now.date()
             start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if start < now - timedelta(hours=3):
                 start = start + timedelta(days=1)
@@ -334,7 +313,6 @@ Reglas:
 - "gano" debe ser true o false solo si el resultado esta publicado y es claro.
 - La URL debe ser la pagina exacta que respalda ese registro.
 - No uses datos de otros jugadores con apellidos parecidos.
-- No conviertas cuotas o pronosticos de terceros en resultados.
 - Si no encuentras un registro verificable, no lo incluyas.
 - No inventes un favorito si los datos son insuficientes.
 """
@@ -670,14 +648,15 @@ async def run_cycle(app):
     now = int(time.time())
     fixtures = load_fixtures()
 
+    # Selecciona únicamente los partidos correspondientes a la franja actual de 30 minutos (con un margen previo de hasta 35 minutos)
     upcoming = [
         item for item in fixtures
-        if now + MIN_LEAD_MIN * 60 <= item["start_ts"] <= now + LEAD_MINUTES * 60
+        if 0 <= item["start_ts"] - now <= 2100
     ]
     if not upcoming:
         return
 
-    # Procesa un bloque cada vez y evita enviar dos mensajes del mismo bloque.
+    # Procesa estrictamente un bloque por ciclo para evitar saturar las APIs
     blocks = sorted(set(item["block_id"] for item in upcoming))
     block_id = next((b for b in blocks if not block_sent(b)), None)
     if not block_id:
@@ -698,8 +677,10 @@ async def run_cycle(app):
                 "report": f"No se pudo completar el análisis: {str(exc)[:180]}",
             }))
 
-    # Prioriza un consenso con datos de mejor calidad; si no existe,
-    # informa el partido con más registros aceptados, sin inventar favorito.
+    if not reports:
+        return
+
+    # Prioriza el partido que tenga consenso de favorito y mejor calidad de datos
     reports.sort(
         key=lambda pair: (
             pair[1]["favorite"] is not None,
@@ -712,7 +693,7 @@ async def run_cycle(app):
     fixture, result = reports[0]
     kickoff = datetime.fromtimestamp(fixture["start_ts"], TZ).strftime("%I:%M %p")
     message = (
-        "🏓 TT ELITE SERIES | INFORME DE PARTIDO\n\n"
+        "🏓 TT ELITE SERIES | INFORME DE FRANJA\n\n"
         f"⚔️ {fixture['player1']} vs {fixture['player2']}\n"
         f"⏱️ Inicio: {kickoff} (Colombia)\n\n"
         f"{result['report']}"
