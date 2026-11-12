@@ -1,5 +1,5 @@
 """
-TT Elite Series v57.8 (POLONIA) - Modelo Perplexity corregido a 'sonar' + Control de Conflicto
+TT Elite Series v57.9 (POLONIA) - Perplexity /v1/responses con modelo 'sonar' corregido
 Pick Media Hora (>= 78%) | Stake 100 / Acierto Total (>= 89%) | Multi-Chat (/activar_grupo)
 """
 
@@ -30,7 +30,7 @@ PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "120"))
-DB_PATH = os.getenv("DB_PATH", "tt_elite_v578.db")
+DB_PATH = os.getenv("DB_PATH", "tt_elite_v579.db")
 
 LEAD_MIN = 35
 MIN_LEAD_MIN = 5
@@ -567,7 +567,7 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 @web.get("/")
 def home():
-    return "TT Elite v57.8 Activo", 200
+    return "TT Elite v57.9 Activo", 200
 
 
 @web.get("/health")
@@ -602,7 +602,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    log.info("Iniciando TT Elite v57.8...")
+    log.info("Iniciando TT Elite v57.9...")
     app.run_polling(drop_pending_updates=True)
 
 
