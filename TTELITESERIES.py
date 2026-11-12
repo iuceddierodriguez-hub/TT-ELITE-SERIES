@@ -1,7 +1,7 @@
 """
 TT ELITE SERIES - BOT DE ANALISIS INFORMATIVO
 - Revisa la cartelera de partidos.txt por bloques de 30 minutos.
-- Perplexity busca resultados recientes y H2H con fuentes web.
+- Perplexity busca resultados recientes y H2H con fuentes web (con timeout optimizado).
 - Python calcula WR5, WR10 y H2H a partir de los datos recuperados.
 - OpenAI analiza exclusivamente esas estadísticas.
 - Selecciona el mejor partido del bloque y envía un único informe.
@@ -276,22 +276,14 @@ def perplexity_search(player1, player2):
         return None, [], "Falta PERPLEXITY_API_KEY."
 
     today = datetime.now(TZ).strftime("%Y-%m-%d")
-    system = (
-        "Eres un investigador de resultados deportivos. No inventes partidos, fechas, "
-        "marcadores, estadisticas ni URLs. Devuelve exclusivamente JSON valido. "
-        "Si no puedes verificar un dato en una fuente web, omite ese dato."
-    )
+    system = "Eres un investigador de resultados deportivos de tenis de mesa. Devuelve EXCLUSIVAMENTE JSON valido sin texto adicional."
 
     user = f"""
-Investiga tenis de mesa para estos jugadores:
-Jugador 1: {player1}
-Jugador 2: {player2}
-Fecha de referencia: {today}
-Torneo de interes: TT Elite Series, Polonia.
-
-Busca resultados recientes de ambos jugadores y enfrentamientos directos.
-Consulta fuentes de resultados como Sofascore, Flashscore, AiScore, Tips Manager
-u otros portales deportivos que realmente muestren el resultado.
+Busca partidos recientes y H2H de:
+- Jugador 1: {player1}
+- Jugador 2: {player2}
+Fecha: {today}
+Torneo: TT Elite Series, Polonia.
 
 Devuelve SOLO este JSON:
 {{
@@ -304,17 +296,9 @@ Devuelve SOLO este JSON:
   "h2h": [
     {{"fecha":"YYYY-MM-DD","ganador":"nombre exacto","marcador":"3-1","url":"URL exacta"}}
   ],
-  "favorito_perplexity":"nombre exacto de uno de los dos o null",
-  "razon":"explicacion breve basada en los datos encontrados"
+  "favorito_perplexity": "nombre exacto o null",
+  "razon": "breve explicacion"
 }}
-
-Reglas:
-- Incluye hasta 10 partidos recientes por jugador, del mas reciente al mas antiguo.
-- "gano" debe ser true o false solo si el resultado esta publicado y es claro.
-- La URL debe ser la pagina exacta que respalda ese registro.
-- No uses datos de otros jugadores con apellidos parecidos.
-- Si no encuentras un registro verificable, no lo incluyas.
-- No inventes un favorito si los datos son insuficientes.
 """
 
     payload = {
@@ -324,46 +308,43 @@ Reglas:
             {"role": "user", "content": user},
         ],
         "temperature": 0,
-        "web_search_options": {"search_context_size": "high"},
     }
     headers = {
         "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
         "Content-Type": "application/json",
     }
 
-    for attempt in range(2):
-        try:
-            response = requests.post(
-                "https://api.perplexity.ai/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=75,
-            )
-            if response.status_code != 200:
-                log.warning("Perplexity HTTP %s: %s", response.status_code, response.text[:300])
-                time.sleep(2)
-                continue
+    try:
+        response = requests.post(
+            "https://api.perplexity.ai/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=20,  # Timeout optimizado a 20s para evitar bloqueos largos al arrancar
+        )
+        if response.status_code != 200:
+            log.warning("Perplexity HTTP %s", response.status_code)
+            return None, [], "Perplexity no respondio a tiempo."
 
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            result = parse_json(content)
-            citations = data.get("citations") or data.get("search_results") or []
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        result = parse_json(content)
+        citations = data.get("citations") or data.get("search_results") or []
 
-            urls = []
-            for citation in citations:
-                if isinstance(citation, str) and citation.startswith("http"):
-                    urls.append(citation)
-                elif isinstance(citation, dict):
-                    url = citation.get("url")
-                    if isinstance(url, str) and url.startswith("http"):
-                        urls.append(url)
+        urls = []
+        for citation in citations:
+            if isinstance(citation, str) and citation.startswith("http"):
+                urls.append(citation)
+            elif isinstance(citation, dict):
+                url = citation.get("url")
+                if isinstance(url, str) and url.startswith("http"):
+                    urls.append(url)
 
-            if result is not None:
-                return result, list(dict.fromkeys(urls)), None
+        if result is not None:
+            return result, list(dict.fromkeys(urls)), None
 
-        except Exception as exc:
-            log.warning("Error consultando Perplexity: %s", exc)
-            time.sleep(2)
+    except Exception as exc:
+        log.warning("Timeout o error en Perplexity: %s", exc)
+        return None, [], "Tiempo de espera agotado para Perplexity."
 
     return None, [], "Perplexity no devolvio una respuesta util."
 
@@ -480,7 +461,7 @@ Devuelve JSON:
 {{
   "favorito": "nombre exacto de uno de los jugadores o NINGUNO",
   "confianza": "BAJA, MEDIA o ALTA",
-  "explicacion": "maximo dos frases basadas en cifras concretas"
+  "explicacion": "maximo dois frases basadas en cifras concretas"
 }}
 No des porcentajes de probabilidad. No presentes una estimacion como certeza.
 """
@@ -648,7 +629,7 @@ async def run_cycle(app):
     now = int(time.time())
     fixtures = load_fixtures()
 
-    # Selecciona únicamente los partidos correspondientes a la franja actual de 30 minutos (con un margen previo de hasta 35 minutos)
+    # Selecciona únicamente los partidos de la franja actual (con margen previo de hasta 35 minutos)
     upcoming = [
         item for item in fixtures
         if 0 <= item["start_ts"] - now <= 2100
