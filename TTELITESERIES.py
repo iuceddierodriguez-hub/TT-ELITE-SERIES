@@ -421,7 +421,6 @@ def select_best_pick_for_current_blocks():
                 prob_ganador = an["prob"]
                 details = an["details"]
 
-            # MÍNIMO ESTRICTO SUBIDO A 78%
             if prob_ganador >= FRANJA_MIN_PROB and fav != "NINGUNO":
                 valid_analyzed.append({
                     **r,
@@ -439,9 +438,6 @@ def select_best_pick_for_current_blocks():
     best_match = valid_analyzed[0]
     best_prob = best_match["prob"]
 
-    # SOLO DOS MENSAJES POSIBLES:
-    # 1) "acierto": Cuando supera o iguala el 89% (Stake 100 / Totalmente de Acierto)
-    # 2) "normal": Mejor de la media hora (entre 78% y 88%)
     if best_prob >= STAKE_ACIERTO_MIN:
         flow = "acierto"
         log.info("🚨🔥 STAKE DE ACIERTO TOTAL DETECTADO (>= %d%%) -> %s (%d%%)", STAKE_ACIERTO_MIN, best_match["fav"], best_prob)
@@ -474,4 +470,7 @@ def format_message(p, flow, mins, prob):
 
     if p["details"]:
         clean_details = p["details"].replace("<b>", "").replace("</b>", "")
-        clean_details = clean_details.replace("Favorito Perplexity:", "Favorito 1:").repla
+        clean_details = clean_details.replace("Favorito Perplexity:", "Favorito 1:").replace("Favorito OpenAI:", "Favorito 2:")
+        if "\nArgumentos:" in clean_details and "\n\nArgumentos:" not in clean_details:
+            clean_details = clean_details.replace("\nArgumentos:", "\n\nArgumentos:")
+        lin
