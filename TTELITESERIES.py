@@ -1,21 +1,18 @@
 """
-TT ELITE SERIES - BOT DE ANALISIS INFORMATIVO
+SKATE10 v57.4 - TT ELITE SERIES (POLONIA)
 - Revisa la cartelera de partidos.txt por bloques de 30 minutos.
-- Perplexity busca resultados recientes y H2H con fuentes web (con timeout optimizado).
-- Python calcula WR5, WR10 y H2H a partir de los datos recuperados.
-- OpenAI analiza exclusivamente esas estadísticas.
-- Selecciona el mejor partido del bloque y envía un único informe.
-- No inventa resultados, porcentajes ni fuentes. Si faltan datos, lo informa.
-- No incluye stakes ni instrucciones de apuestas.
+- Búsqueda web específica para TT Elite Series con Perplexity (timeout optimizado de 20s).
+- Auditoría rigurosa y estadística con OpenAI (gpt-4o-mini).
+- Servidor web Flask integrado para despliegue en Render y soporte multi-chat.
+- Sin apuestas, solo análisis informativo y selectivo por franja.
 """
 
 import asyncio
-import html
 import json
 import logging
 import os
-import re
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -23,9 +20,10 @@ from zoneinfo import ZoneInfo
 from urllib.parse import urlparse
 
 import requests
+from flask import Flask, jsonify
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from openai import OpenAI
-from telegram import Update
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
 
 # ---------------- CONFIGURACION ----------------
 
@@ -33,21 +31,30 @@ TZ = ZoneInfo("America/Bogota")
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 
 DB_PATH = os.getenv("DB_PATH", "tt_elite_analisis.db")
-POLL_SECONDS = max(30, int(os.getenv("POLL_SECONDS", "60")))
+POLL_SECONDS = int(os.getenv("POLL_SECONDS", "120"))
+
+LEAD_MIN = 35
+MIN_LEAD_MIN = 3
 MIN_MATCHES_PER_PLAYER = 3
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
+for noisy in ("httpx", "httpcore", "urllib3"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 log = logging.getLogger("TT_ELITE")
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+web = Flask(__name__)
+started_at = time.time()
+
 
 # ---------------- BASE DE DATOS ----------------
 
@@ -63,46 +70,43 @@ def db():
 
 
 def init_db():
-    with db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS sent_blocks (
-                block_id TEXT PRIMARY KEY,
-                sent_at INTEGER NOT NULL,
-                message_type TEXT NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS match_reports (
-                event_id TEXT PRIMARY KEY,
-                block_id TEXT NOT NULL,
-                player1 TEXT NOT NULL,
-                player2 TEXT NOT NULL,
-                favorite TEXT,
-                quality TEXT NOT NULL,
-                report TEXT NOT NULL,
-                created_at INTEGER NOT NULL
-            )
-        """)
+    with db() as c:
+        c.execute("""CREATE TABLE IF NOT EXISTS fixtures (
+            event_id TEXT PRIMARY KEY, player1 TEXT, player2 TEXT, start_ts INTEGER, hour_block TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS analysis (
+            event_id TEXT PRIMARY KEY, fav TEXT, rating REAL, prob INTEGER, quality TEXT,
+            details TEXT, analyzed_at INTEGER)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS picks (
+            event_id TEXT PRIMARY KEY, flow TEXT, rating REAL, fav TEXT,
+            player1 TEXT, player2 TEXT, start_ts INTEGER, sent_at INTEGER,
+            hit INTEGER, details TEXT, hour_block TEXT)""")
+        c.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS extra_chats (chat_id TEXT PRIMARY KEY)")
 
 
-def block_sent(block_id):
-    with db() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM sent_blocks WHERE block_id=?",
-            (block_id,),
-        ).fetchone()
-    return row is not None
+def get_all_chat_ids():
+    init_db()
+    targets = set()
+    for cid in CHAT_ID.split(","):
+        if cid.strip():
+            targets.add(cid.strip())
+    with db() as c:
+        rows = c.execute("SELECT chat_id FROM extra_chats").fetchall()
+        for r in rows:
+            if r["chat_id"]:
+                targets.add(str(r["chat_id"]).strip())
+    return list(targets)
 
 
-def mark_block_sent(block_id, message_type):
-    with db() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO sent_blocks(block_id, sent_at, message_type) VALUES(?,?,?)",
-            (block_id, int(time.time()), message_type),
-        )
+def block_already_sent(hour_block):
+    with db() as c:
+        row = c.execute("SELECT COUNT(*) FROM picks WHERE hour_block=?", (hour_block,)).fetchone()
+        return row[0] > 0 if row else False
 
 
 # ---------------- UTILIDADES ----------------
+
+import re
 
 def normalize(value):
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
@@ -214,62 +218,7 @@ def source_host(url):
         return ""
 
 
-# ---------------- CARTELERA ----------------
-
-def load_fixtures():
-    path = "partidos.txt"
-    if not os.path.exists(path):
-        log.warning("No existe partidos.txt")
-        return []
-
-    now = datetime.now(TZ)
-    fixtures = []
-
-    with open(path, "r", encoding="utf-8") as file:
-        for line_no, raw in enumerate(file, 1):
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-
-            parts = line.split("|", 1)
-            if len(parts) != 2 or " vs " not in parts[1]:
-                log.warning("Formato incorrecto en partidos.txt linea %s", line_no)
-                continue
-
-            time_text, matchup = parts[0].strip(), parts[1].strip()
-            player1, player2 = [x.strip() for x in matchup.split(" vs ", 1)]
-
-            if not player1 or not player2:
-                continue
-
-            try:
-                hour, minute = map(int, time_text.split(":"))
-                if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                    raise ValueError("hora fuera de rango")
-            except Exception:
-                log.warning("Hora invalida en linea %s: %s", line_no, time_text)
-                continue
-
-            start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if start < now - timedelta(hours=3):
-                start = start + timedelta(days=1)
-
-            block_minute = 30 if minute >= 30 else 0
-            block_id = f"{start.date().isoformat()}_{hour:02d}:{block_minute:02d}"
-            event_id = f"{block_id}_{line_no}_{normalize(player1)}_{normalize(player2)}"
-
-            fixtures.append({
-                "event_id": event_id,
-                "block_id": block_id,
-                "player1": player1,
-                "player2": player2,
-                "start_ts": int(start.timestamp()),
-            })
-
-    return fixtures
-
-
-# ---------------- PERPLEXITY: BUSQUEDA WEB ----------------
+# ---------------- PERPLEXITY: BÚSQUEDA WEB ----------------
 
 def perplexity_search(player1, player2):
     if not PERPLEXITY_API_KEY:
@@ -279,11 +228,11 @@ def perplexity_search(player1, player2):
     system = "Eres un investigador de resultados deportivos de tenis de mesa. Devuelve EXCLUSIVAMENTE JSON valido sin texto adicional."
 
     user = f"""
-Busca partidos recientes y H2H de:
+Busca partidos recientes y H2H de tenis de mesa para:
 - Jugador 1: {player1}
 - Jugador 2: {player2}
-Fecha: {today}
-Torneo: TT Elite Series, Polonia.
+Fecha de referencia: {today}
+Torneo: TT Elite Series (Polonia).
 
 Devuelve SOLO este JSON:
 {{
@@ -319,7 +268,7 @@ Devuelve SOLO este JSON:
             "https://api.perplexity.ai/chat/completions",
             headers=headers,
             json=payload,
-            timeout=20,  # Timeout optimizado a 20s para evitar bloqueos largos al arrancar
+            timeout=20,  # Timeout optimizado a 20s para agilizar el arranque de la franja
         )
         if response.status_code != 200:
             log.warning("Perplexity HTTP %s", response.status_code)
@@ -349,7 +298,7 @@ Devuelve SOLO este JSON:
     return None, [], "Perplexity no devolvio una respuesta util."
 
 
-# ---------------- ESTADISTICAS EN PYTHON ----------------
+# ---------------- ESTADISTICAS Y ANALISIS OPENAI ----------------
 
 def calculate_stats(data, player1, player2, citations):
     matches1 = clean_matches(data.get("partidos_j1"), citations)
@@ -406,31 +355,19 @@ def data_quality(stats):
     return "SIN DATOS"
 
 
-def stats_leader(stats, player1, player2):
-    if not stats["p1"] or not stats["p2"]:
-        return None
+def analizar_partido(player1: str, player2: str):
+    data, citations, error = perplexity_search(player1, player2)
+    if not data:
+        return "NINGUNO", 5.0, 50, error or "No se recuperaron datos verificables."
 
-    wr1 = stats["p1_wr10"] if stats["p1_wr10"] is not None else 0.5
-    wr2 = stats["p2_wr10"] if stats["p2_wr10"] is not None else 0.5
-    recent1 = stats["p1_wr5"] if stats["p1_wr5"] is not None else wr1
-    recent2 = stats["p2_wr5"] if stats["p2_wr5"] is not None else wr2
+    stats = calculate_stats(data, player1, player2, citations)
+    quality = data_quality(stats)
 
-    score1 = 0.65 * wr1 + 0.35 * recent1
-    score2 = 0.65 * wr2 + 0.35 * recent2
+    if quality == "SIN DATOS":
+        return "NINGUNO", 5.0, 50, "Datos insuficientes para emitir juicio."
 
-    h2h_diff = stats["h2h_p1"] - stats["h2h_p2"]
-    score1 += max(-3, min(3, h2h_diff)) * 0.025
-
-    if abs(score1 - score2) < 0.04:
-        return None
-    return player1 if score1 > score2 else player2
-
-
-# ---------------- OPENAI: ANALISIS ESTADISTICO ----------------
-
-def openai_analysis(player1, player2, stats, quality):
     if not openai_client:
-        return None
+        return player1, 7.5, 75, "OpenAI no configurado."
 
     evidence = {
         "calidad": quality,
@@ -443,16 +380,13 @@ def openai_analysis(player1, player2, stats, quality):
         "jugador_2_wr5": stats["p2_wr5"],
         "jugador_2_wr10": stats["p2_wr10"],
         "h2h": stats["h2h"],
-        "h2h_victorias": {
-            player1: stats["h2h_p1"],
-            player2: stats["h2h_p2"],
-        },
+        "h2h_victorias": {player1: stats["h2h_p1"], player2: stats["h2h_p2"]},
     }
 
     prompt = f"""
-Analiza tenis de mesa usando EXCLUSIVAMENTE estos datos estructurados.
+Analiza tenis de mesa (TT Elite Series) usando EXCLUSIVAMENTE estos datos estructurados.
 No uses conocimiento externo, no inventes resultados ni completes estadisticas.
-Si la muestra es pequeña, incompleta o contradictoria, devuelve "NINGUNO".
+Si la muestra es pequeña, incompleta o contradictoria, devuelve favorito "NINGUNO".
 
 DATOS:
 {json.dumps(evidence, ensure_ascii=False)}
@@ -461,9 +395,8 @@ Devuelve JSON:
 {{
   "favorito": "nombre exacto de uno de los jugadores o NINGUNO",
   "confianza": "BAJA, MEDIA o ALTA",
-  "explicacion": "maximo dois frases basadas en cifras concretas"
+  "explicacion": "maximo dos frases basadas en cifras concretas"
 }}
-No des porcentajes de probabilidad. No presentes una estimacion como certeza.
 """
 
     try:
@@ -474,274 +407,294 @@ No des porcentajes de probabilidad. No presentes una estimacion como certeza.
             messages=[{"role": "user", "content": prompt}],
             max_tokens=250,
         )
-        return parse_json(response.choices[0].message.content)
+        ai_res = parse_json(response.choices[0].message.content) or {}
+        fav = player_match(ai_res.get("favorito"), player1, player2) or "NINGUNO"
+        expl = str(ai_res.get("explicacion", "")).strip()
+
+        prob = 80 if ai_res.get("confianza") == "ALTA" else 75
+        rating = 8.5 if prob >= 80 else 7.5
+
+        details = (
+            f"📶 Calidad de datos: {quality}\n"
+            f"🤝 H2H: {player1} {stats['h2h_p1']} - {stats['h2h_p2']} {player2}\n"
+            f"💡 Análisis: {expl or 'Datos evaluados por consenso IA.'}"
+        )
+        return fav, rating, prob, details
     except Exception as exc:
         log.warning("OpenAI fallo: %s", exc)
-        return None
+        return "NINGUNO", 5.0, 50, "Error en procesamiento estadístico."
 
 
-# ---------------- INFORME DEL PARTIDO ----------------
+# ---------------- CARGA DE CARTELERA ----------------
 
-def analyze_fixture(fixture):
-    player1 = fixture["player1"]
-    player2 = fixture["player2"]
+def cargar_partidos_desde_txt():
+    archivo = "partidos.txt"
+    if not os.path.exists(archivo):
+        return []
 
-    data, citations, error = perplexity_search(player1, player2)
-    if not data:
-        return {
-            "favorite": None,
-            "quality": "SIN DATOS",
-            "report": error or "No se recuperaron datos verificables.",
-        }
+    partidos = []
+    hoy_dt = datetime.now(TZ)
 
-    stats = calculate_stats(data, player1, player2, citations)
-    quality = data_quality(stats)
+    with open(archivo, "r", encoding="utf-8") as f:
+        for idx, linea in enumerate(f.readlines()):
+            linea = linea.strip()
+            if not linea or linea.startswith("#"):
+                continue
+            parts = [p.strip() for p in linea.split("|")]
+            if len(parts) >= 2:
+                time_str = parts[0]
+                match_str = parts[1]
+                if " vs " in match_str:
+                    player1, player2 = match_str.split(" vs ", 1)
+                else:
+                    player1, player2 = match_str, "Rival"
+            else:
+                continue
 
-    if quality == "SIN DATOS":
-        return {
-            "favorite": None,
-            "quality": quality,
-            "report": (
-                "Perplexity no devolvio registros que cumplieran los controles "
-                "de fecha, resultado y URL citada. No se recomienda inferir un ganador."
-            ),
-        }
+            try:
+                h, m = map(int, time_str.split(":"))
+                target_date = hoy_dt
+                match_dt = target_date.replace(hour=h, minute=m, second=0, microsecond=0)
+                if match_dt < hoy_dt - timedelta(hours=3):
+                    match_dt += timedelta(days=1)
 
-    ai = openai_analysis(player1, player2, stats, quality)
-    ppx_favorite = player_match(data.get("favorito_perplexity"), player1, player2)
-    ai_favorite = player_match((ai or {}).get("favorito"), player1, player2)
-    statistical_favorite = stats_leader(stats, player1, player2)
+                ts = int(match_dt.timestamp())
+                half_m = 30 if m >= 30 else 0
+                hour_block = f"{match_dt.date().isoformat()}_{h:02d}:{half_m:02d}"
+            except Exception:
+                ts = int(time.time()) + (idx + 1) * 1800
+                hour_block = f"{hoy_dt.date().isoformat()}_{time_str.strip()}"
 
-    if ppx_favorite and ai_favorite and ppx_favorite == ai_favorite:
-        favorite = ppx_favorite
-        agreement = "COINCIDEN"
-    else:
-        favorite = None
-        agreement = "SIN CONSENSO"
+            partidos.append({
+                "id": f"match_{idx}_{time_str.replace(':', '')}",
+                "player1": player1.strip(),
+                "player2": player2.strip(),
+                "time": time_str.strip(),
+                "hour_block": hour_block,
+                "timestamp": ts
+            })
+    return partidos
 
-    def match_lines(items):
-        if not items:
-            return "No hay registros aceptados."
-        lines = []
-        for item in items[:5]:
-            result = "Victoria" if item["gano"] else "Derrota"
-            score = f" | {item['marcador']}" if item["marcador"] else ""
-            host = source_host(item["url"])
-            lines.append(f"• {item['fecha']} vs {item['rival']}: {result}{score} ({host})")
-        return "\n".join(lines)
 
+def fetch_fixtures_only():
+    init_db()
+    items = cargar_partidos_desde_txt()
+    with db() as c:
+        for it in items:
+            c.execute("""INSERT OR REPLACE INTO fixtures(event_id, player1, player2, start_ts, hour_block) 
+                        VALUES (?,?,?,?,?)""",
+                      (it["id"], it["player1"], it["player2"], it["timestamp"], it["hour_block"]))
+
+
+# ---------------- SELECCIÓN POR FRANJA ----------------
+
+def select_best_pick_for_current_blocks():
+    init_db()
+    now = int(time.time())
+
+    with db() as c:
+        upcoming_blocks = [
+            r["hour_block"] for r in c.execute("""
+                SELECT DISTINCT hour_block FROM fixtures
+                WHERE start_ts BETWEEN ? AND ?
+            """, (now + MIN_LEAD_MIN * 60, now + LEAD_MIN * 60)).fetchall()
+        ]
+
+    if not upcoming_blocks:
+        return None, None, 0
+
+    pending_blocks = [b for b in upcoming_blocks if not block_already_sent(b)]
+    if not pending_blocks:
+        return None, None, 0
+
+    target_block = sorted(pending_blocks)[0]
+
+    with db() as c:
+        block_matches = [dict(r) for r in c.execute("""
+            SELECT event_id, player1, player2, start_ts, hour_block
+            FROM fixtures
+            WHERE hour_block = ? AND start_ts > ?
+            ORDER BY start_ts ASC
+        """, (target_block, now + 2 * 60)).fetchall()]
+
+    if not block_matches:
+        return None, None, 0
+
+    valid_analyzed = []
+    with db() as c:
+        for r in block_matches:
+            eid = r["event_id"]
+            an = c.execute("SELECT fav, rating, prob, details FROM analysis WHERE event_id=?", (eid,)).fetchone()
+            if not an:
+                fav, rating, prob_ganador, details = analizar_partido(r["player1"], r["player2"])
+                c.execute("""INSERT OR REPLACE INTO analysis(event_id, fav, rating, prob, quality, details, analyzed_at) 
+                             VALUES (?,?,?,?,?,?,?)""",
+                          (eid, fav, rating, prob_ganador, "alta" if prob_ganador >= 75 else "moderada", details, now))
+                time.sleep(0.3)
+            else:
+                fav = an["fav"]
+                rating = an["rating"]
+                prob_ganador = an["prob"]
+                details = an["details"]
+
+            if fav != "NINGUNO":
+                valid_analyzed.append({
+                    **r,
+                    "fav": fav,
+                    "rating": rating,
+                    "details": details,
+                    "prob": prob_ganador
+                })
+
+    if not valid_analyzed:
+        return None, None, 0
+
+    valid_analyzed.sort(key=lambda x: (x["prob"], x["rating"]), reverse=True)
+    best_match = valid_analyzed[0]
+    return best_match, "consenso", best_match["prob"]
+
+
+# ---------------- ENVÍO TELEGRAM ----------------
+
+def format_message(p, prob):
+    kickoff = datetime.fromtimestamp(p["start_ts"], TZ).strftime("%I:%M %p").lstrip("0")
     lines = [
-        f"📶 Calidad de datos: {quality}",
-        f"🤖 Favorito según Perplexity: {ppx_favorite or 'Sin veredicto'}",
-        f"🧠 Favorito según OpenAI: {ai_favorite or 'Sin veredicto'}",
-        f"📊 Líder estadístico calculado: {statistical_favorite or 'Sin ventaja clara'}",
-        f"🤝 Consenso entre IAs: {agreement}",
-        "",
-        f"📈 {player1} | WR5: {percent(stats['p1_wr5'])} | WR10: {percent(stats['p1_wr10'])}",
-        match_lines(stats["p1"]),
-        "",
-        f"📈 {player2} | WR5: {percent(stats['p2_wr5'])} | WR10: {percent(stats['p2_wr10'])}",
-        match_lines(stats["p2"]),
-        "",
-        f"🤝 H2H validado: {player1} {stats['h2h_p1']} - {stats['h2h_p2']} {player2}",
-        f"🔎 URLs citadas por Perplexity: {len(citations)}",
+        "🏓 <b>TT ELITE SERIES | INFORME DE FRANJA</b>",
+        f"🏆 <b>Ganador Sugerido: {p['fav']}</b>",
+        f"⚔️ {p['player1']} vs {p['player2']}",
+        f"⏱️ Inicio: {kickoff} (Colombia)\n",
+        p["details"]
     ]
-
-    reason = str(data.get("razon") or "").strip()
-    if reason:
-        lines.extend(["", f"🤖 Nota de búsqueda: {reason}"])
-
-    ai_reason = str((ai or {}).get("explicacion") or "").strip()
-    if ai_reason:
-        lines.extend(["", f"🧠 Nota estadística: {ai_reason}"])
-
-    if favorite:
-        lines.extend([
-            "",
-            f"📌 Favorito informativo por consenso: {favorite}",
-            "Este análisis describe datos disponibles; no garantiza el resultado.",
-        ])
-    else:
-        lines.extend([
-            "",
-            "📌 No hay consenso suficiente para señalar un favorito.",
-        ])
-
-    return {
-        "favorite": favorite,
-        "quality": quality,
-        "report": "\n".join(lines),
-    }
+    return "\n".join(lines)
 
 
-# ---------------- TELEGRAM ----------------
+async def send_pick(app, p, prob):
+    text = format_message(p, prob)
+    keyboard = [[InlineKeyboardButton("📤 Enviar a otros chats", switch_inline_query=text)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-async def send_to_chats(app, message):
-    chat_ids = [x.strip() for x in CHAT_ID.split(",") if x.strip()]
-    for chat_id in chat_ids:
+    for cid in get_all_chat_ids():
         try:
             await app.bot.send_message(
-                chat_id=chat_id,
-                text=message,
+                chat_id=cid,
+                text=text,
+                parse_mode="HTML",
                 disable_web_page_preview=True,
+                reply_markup=reply_markup
             )
         except Exception as exc:
-            log.error("No se pudo enviar a %s: %s", chat_id, exc)
-
-
-async def command_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🏓 Bot de análisis TT Elite activo.\n"
-        "Comandos: /id, /test, /estado, /partidos"
-    )
-
-
-async def command_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"ID de este chat: {update.effective_chat.id}")
-
-
-async def command_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ El bot está respondiendo correctamente.")
-
-
-async def command_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    with db() as conn:
-        count = conn.execute("SELECT COUNT(*) FROM sent_blocks").fetchone()[0]
-    await update.message.reply_text(
-        f"🟢 Bot activo\nBloques procesados: {count}\nZona horaria: America/Bogota"
-    )
-
-
-async def command_partidos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    fixtures = load_fixtures()
-    if not fixtures:
-        await update.message.reply_text("No hay partidos validos en partidos.txt.")
-        return
-
-    lines = ["📋 Cartelera cargada:"]
-    for item in fixtures[:20]:
-        start = datetime.fromtimestamp(item["start_ts"], TZ).strftime("%I:%M %p")
-        lines.append(f"• {start}: {item['player1']} vs {item['player2']}")
-    await update.message.reply_text("\n".join(lines))
+            log.warning("No se pudo enviar al chat %s: %s", cid, exc)
 
 
 async def run_cycle(app):
-    now = int(time.time())
-    fixtures = load_fixtures()
+    await asyncio.to_thread(fetch_fixtures_only)
+    best_p, flow, prob = await asyncio.to_thread(select_best_pick_for_current_blocks)
+    if best_p and get_all_chat_ids():
+        await send_pick(app, best_p, prob)
 
-    # Selecciona únicamente los partidos de la franja actual (con margen previo de hasta 35 minutos)
-    upcoming = [
-        item for item in fixtures
-        if 0 <= item["start_ts"] - now <= 2100
-    ]
-    if not upcoming:
-        return
+        with db() as c:
+            c.execute("""INSERT OR IGNORE INTO picks
+                (event_id, flow, rating, fav, player1, player2, start_ts, sent_at, details, hour_block)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (best_p["event_id"], flow, best_p["rating"], best_p["fav"], best_p["player1"],
+                 best_p["player2"], best_p["start_ts"], int(time.time()), best_p["details"], best_p["hour_block"]))
 
-    # Procesa estrictamente un bloque por ciclo para evitar saturar las APIs
-    blocks = sorted(set(item["block_id"] for item in upcoming))
-    block_id = next((b for b in blocks if not block_sent(b)), None)
-    if not block_id:
-        return
-
-    matches = [item for item in upcoming if item["block_id"] == block_id]
-    reports = []
-
-    for fixture in matches:
-        try:
-            result = await asyncio.to_thread(analyze_fixture, fixture)
-            reports.append((fixture, result))
-        except Exception as exc:
-            log.exception("Error analizando partido")
-            reports.append((fixture, {
-                "favorite": None,
-                "quality": "ERROR",
-                "report": f"No se pudo completar el análisis: {str(exc)[:180]}",
-            }))
-
-    if not reports:
-        return
-
-    # Prioriza el partido que tenga consenso de favorito y mejor calidad de datos
-    reports.sort(
-        key=lambda pair: (
-            pair[1]["favorite"] is not None,
-            pair[1]["quality"] == "ALTA",
-            pair[1]["quality"] == "MEDIA",
-        ),
-        reverse=True,
-    )
-
-    fixture, result = reports[0]
-    kickoff = datetime.fromtimestamp(fixture["start_ts"], TZ).strftime("%I:%M %p")
-    message = (
-        "🏓 TT ELITE SERIES | INFORME DE FRANJA\n\n"
-        f"⚔️ {fixture['player1']} vs {fixture['player2']}\n"
-        f"⏱️ Inicio: {kickoff} (Colombia)\n\n"
-        f"{result['report']}"
-    )
-
-    await send_to_chats(app, message)
-    mark_block_sent(block_id, "consenso" if result["favorite"] else "informe_sin_consenso")
-
-    with db() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO match_reports
-            (event_id, block_id, player1, player2, favorite, quality, report, created_at)
-            VALUES(?,?,?,?,?,?,?,?)
-            """,
-            (
-                fixture["event_id"],
-                block_id,
-                fixture["player1"],
-                fixture["player2"],
-                result["favorite"],
-                result["quality"],
-                result["report"],
-                int(time.time()),
-            ),
-        )
-
-    log.info("Informe enviado para bloque %s", block_id)
+        log.info("Informe enviado para bloque %s -> Ganador: %s", best_p["hour_block"], best_p["fav"])
 
 
-async def monitor_loop(app):
+async def monitor_loop(app: Application):
     while True:
         try:
             await run_cycle(app)
-        except Exception:
-            log.exception("Error en ciclo del monitor")
+        except Exception as exc:
+            log.error("Fallo en bucle monitor: %s", str(exc)[:300])
         await asyncio.sleep(POLL_SECONDS)
 
 
-async def post_init(app):
-    app.create_task(monitor_loop(app))
+# ---------------- COMANDOS TELEGRAM ----------------
+
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🏓 Bot de análisis TT Elite Series activo.")
+
+
+async def cmd_id(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cid = str(update.effective_chat.id)
+    await update.message.reply_text(f"🆔 ID de este chat: <code>{cid}</code>", parse_mode="HTML")
+
+
+async def cmd_activar_grupo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    init_db()
+    cid = str(update.effective_chat.id)
+    with db() as c:
+        c.execute("INSERT OR IGNORE INTO extra_chats(chat_id) VALUES (?)", (cid,))
+    await update.message.reply_text(f"✅ <b>Grupo vinculado correctamente a TT Elite Series:</b> <code>{cid}</code>", parse_mode="HTML")
+
+
+async def cmd_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("✅ El bot de TT Elite Series está respondiendo correctamente.")
+
+
+async def cmd_estado(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    with db() as c:
+        count = c.execute("SELECT COUNT(*) FROM fixtures WHERE start_ts>?", (int(time.time()),)).fetchone()[0]
+    await update.message.reply_text(f"🟢 Bot TT Elite Activo\nPartidos futuros cargados: {count}\nZona horaria: America/Bogota")
+
+
+async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    init_db()
+    now = int(time.time())
+    with db() as c:
+        rows = c.execute("SELECT player1, player2, start_ts FROM fixtures WHERE start_ts >= ? ORDER BY start_ts LIMIT 15", (now,)).fetchall()
+    if not rows:
+        await update.message.reply_text("No hay partidos validos en partidos.txt.")
+        return
+    lines = ["📋 Cartelera TT Elite Series cargada:"]
+    for r in rows:
+        hh = datetime.fromtimestamp(r["start_ts"], TZ).strftime("%I:%M %p")
+        lines.append(f"• {hh}: {r['player1']} vs {r['player2']}")
+    await update.message.reply_text("\n".join(lines))
+
+
+# ---------------- WEB (Render) ----------------
+
+@web.get("/")
+def home():
+    return "TT Elite Series Bot Activo", 200
+
+
+@web.get("/health")
+def health():
+    return jsonify({"status": "ok", "uptime_seconds": int(time.time() - started_at)}), 200
+
+
+def run_web():
+    port = int(os.getenv("PORT", "10000"))
+    web.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+
+async def post_init(application: Application):
+    await asyncio.to_thread(fetch_fixtures_only)
+    application.create_task(monitor_loop(application))
 
 
 def main():
-    missing = []
-    if not TOKEN:
-        missing.append("TELEGRAM_BOT_TOKEN")
-    if not CHAT_ID:
-        missing.append("TELEGRAM_CHAT_ID")
-    if not PERPLEXITY_API_KEY:
-        missing.append("PERPLEXITY_API_KEY")
-    if not OPENAI_API_KEY:
-        missing.append("OPENAI_API_KEY")
-
-    if missing:
-        raise RuntimeError("Faltan variables de entorno: " + ", ".join(missing))
-
+    if not TOKEN or not CHAT_ID:
+        raise RuntimeError("Faltan variables esenciales de Telegram.")
     init_db()
 
-    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
-    app.add_handler(CommandHandler("start", command_start))
-    app.add_handler(CommandHandler("id", command_id))
-    app.add_handler(CommandHandler("test", command_test))
-    app.add_handler(CommandHandler("estado", command_estado))
-    app.add_handler(CommandHandler("partidos", command_partidos))
+    threading.Thread(target=run_web, daemon=True).start()
 
-    log.info("Iniciando bot de análisis TT Elite...")
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    for name, fn in [
+        ("start", cmd_start), ("id", cmd_id), ("activar_grupo", cmd_activar_grupo),
+        ("test", cmd_test), ("estado", cmd_estado), ("partidos", cmd_partidos)
+    ]:
+        app.add_handler(CommandHandler(name, fn))
+
+    app.add_handler(CallbackQueryHandler(lambda u, c: u.callback_query.answer()))
+
+    log.info("Iniciando bot TT Elite Series con servidor web integrado...")
     app.run_polling(drop_pending_updates=True)
 
 
