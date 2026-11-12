@@ -240,8 +240,7 @@ Devuelve estrictamente este JSON válido:
             prob_p1 = prob_ganador
             prob_p2 = prob_perdedor
         else:
-            # Verificación por apellido en caso de abreviaturas
-            p1_ apellido = player1.split()[0].lower()
+            p1_apellido = player1.split()[0].lower()
             p2_apellido = player2.split()[0].lower()
             if p2_apellido in ganador_raw.lower():
                 fav = player2
@@ -401,7 +400,6 @@ def select_best_pick_for_current_blocks():
     if not all_analyzed:
         return None, None, 0
 
-    # Ordena de mayor a menor probabilidad y rating para sacar el mejor de la franja
     all_analyzed.sort(key=lambda x: (x["prob"], x["rating"]), reverse=True)
     best_match = all_analyzed[0]
     best_prob = best_match["prob"]
@@ -410,11 +408,9 @@ def select_best_pick_for_current_blocks():
     can_send_100 = seconds_since_last_100() >= 2 * 3600
     flow = "normal"
 
-    # Prioridad 1: STAKE SEGURO (>= 92%)
     if best_prob >= STAKE_SEGURO_MIN:
         flow = "seguro"
         log.info("🚨 STAKE SEGURO DETECTADO (>= 92%%) -> %s (%d%%)", best_match["fav"], best_prob)
-    # Prioridad 2: Stake 100 (>= 85% o el más cercano >= 78% cuando toca turno cada 2h)
     elif sent_today < DAILY_MIN_100 and can_send_100:
         if best_prob >= STAKE_100_MIN:
             flow = "100"
