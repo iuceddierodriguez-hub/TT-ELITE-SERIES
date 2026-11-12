@@ -1,6 +1,6 @@
 """
-TT Elite Series v51 - Doble Consenso (Perplexity + OpenAI) + Cero Sesgo de Posición
-Franja Horaria >= 75% | Stake 100 >= 85% | Stake Seguro >= 92% (con Fallback al mejor)
+TT Elite Series v52 - Bloques de 30 Minutos + Filtro Estricto (>= 75%)
+Stake 100 Estricto (>= 85% sin fallback) | Stake Seguro (>= 92%) | Doble Consenso
 """
 
 import asyncio
@@ -29,17 +29,15 @@ PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-POLL_SECONDS = int(os.getenv("POLL_SECONDS", "180"))
-DB_PATH = os.getenv("DB_PATH", "tt_elite_v51.db")
+POLL_SECONDS = int(os.getenv("POLL_SECONDS", "120"))  # Revisa cada 2 minutos
+DB_PATH = os.getenv("DB_PATH", "tt_elite_v52.db")
 
-LEAD_MIN = 45
-MIN_LEAD_MIN = 10
+LEAD_MIN = 35          # Evalúa el bloque de media hora hasta 35 min antes
+MIN_LEAD_MIN = 5
 
-DAILY_MIN_100 = 4
-STAKE_SEGURO_MIN = 92        # Alerta máxima (>= 92%)
-STAKE_100_MIN = 85           # Umbral Stake 100 (>= 85%)
-STAKE_100_FALLBACK_MIN = 78  # Más cercano al 85% cuando toca turno de Stake 100
-FRANJA_MIN_PROB = 75         # Umbral Franja Horaria (>= 75%)
+STAKE_SEGURO_MIN = 92  # Alerta extrema (>= 92%)
+STAKE_100_MIN = 85     # Stake 100 estricto (>= 85% únicamente)
+FRANJA_MIN_PROB = 75   # Mínimo estricto para enviar el mejor de cada 30 min (>= 75%)
 
 TZ = ZoneInfo("America/Bogota")
 
@@ -94,14 +92,6 @@ def block_already_sent(hour_block):
         return row[0] > 0 if row else False
 
 
-def seconds_since_last_100():
-    with db() as c:
-        row = c.execute("SELECT MAX(sent_at) as last_sent FROM picks WHERE flow IN ('100', 'seguro')").fetchone()
-        if row and row["last_sent"]:
-            return time.time() - row["last_sent"]
-        return 999999
-
-
 # ---------------- PASO 1: PERPLEXITY (INVESTIGA Y PROPONE SU GANADOR) ----------------
 
 def extraer_texto_perplexity(data: dict) -> str:
@@ -120,18 +110,18 @@ def extraer_texto_perplexity(data: dict) -> str:
 def investigar_con_perplexity(player1: str, player2: str) -> str:
     if not PERPLEXITY_API_KEY:
         log.warning("PERPLEXITY_API_KEY no configurada.")
-        return "Sin datos web en tiempo real."
+        return "SIN_DATOS"
 
     fecha_hoy = datetime.now(TZ).strftime("%Y-%m-%d")
 
     prompt_busqueda = (
-        f"Busca toda la información estadística real en la web (Sofascore, Flashscore, BetsAPI, Setka, TT Elite Series) "
+        f"Busca toda la información estadística real en la web (Sofascore, Flashscore, BetsAPI, TT Elite Series Polonia) "
         f"sobre el partido de tenis de mesa entre {player1} y {player2} a fecha de hoy ({fecha_hoy}). "
         f"Analiza y entrega obligatoriamente: "
         f"1. Rendimiento y resultados recientes de {player1} (últimos 7 días). "
         f"2. Rendimiento y resultados recientes de {player2} (últimos 7 días). "
         f"3. Historial Head-to-Head (H2H) directo entre ambos (últimos 2 meses e histórico). "
-        f"4. VEREDICTO DE PERPLEXITY: Basado estrictamente en los datos encontrados (sin importar quién fue nombrado primero o segundo), "
+        f"4. VEREDICTO DE PERPLEXITY: Basado estrictamente en los datos reales encontrados (sin importar el orden de los nombres), "
         f"indica explícitamente cuál de los dos jugadores es el ganador más probable y con qué porcentaje estimado."
     )
 
@@ -168,44 +158,46 @@ def investigar_con_perplexity(player1: str, player2: str) -> str:
             if resp.status_code == 200:
                 texto = extraer_texto_perplexity(resp.json())
                 if texto:
-                    log.info("Perplexity investigó y dio su favorito: %s vs %s", player1, player2)
+                    log.info("Perplexity investigó: %s vs %s", player1, player2)
                     return texto
         except Exception as exc:
             log.debug("Excepción en Perplexity: %s", exc)
 
-    return "No se pudo extraer información reciente de Perplexity."
+    return "SIN_DATOS"
 
 
-# ---------------- PASO 2: OPENAI (SEGUNDA OPINIÓN Y CONSENSO IMPARCIAL) ----------------
+# ---------------- PASO 2: OPENAI (DOBLE CONSENSO IMPARCIAL Y FILTRO DE DATOS) ----------------
 
 def analizar_partido(player1: str, player2: str):
     datos_perplexity = investigar_con_perplexity(player1, player2)
 
-    if not openai_client:
-        return player1, 7.5, 75, f"📊 Probabilidades: {player1}: 50% | {player2}: 50%\nArgumentos: Sin OpenAI.\nValue Bet: No"
+    if not openai_client or datos_perplexity == "SIN_DATOS":
+        return "NINGUNO", 5.0, 50, "Sin datos verificables."
 
     prompt_analisis = f"""
-Eres un analista cuantitativo experto en tenis de mesa.
-Abajo tienes toda la investigación web de Perplexity (incluyendo rachas recientes, H2H y el candidato que propone Perplexity) para el duelo entre "{player1}" y "{player2}".
+Eres un analista cuantitativo experto en tenis de mesa (TT Elite Series Polonia).
+Abajo tienes toda la investigación web de Perplexity (rachas recientes, H2H y el candidato que propone Perplexity) para el duelo entre "{player1}" y "{player2}".
 
 INSTRUCCIONES DE DOBLE ANÁLISIS (CERO SESGO DE POSICIÓN):
-1. Lee todos los datos aportados por Perplexity (H2H, victorias recientes, estado de forma) y revisa el veredicto de Perplexity.
-2. Haz tu propio análisis matemático independiente comparando los números de "{player1}" y los números de "{player2}".
-3. El ganador debe elegirse 100% por mérito estadístico (quien tenga mejor H2H y mejor racha de victorias), sin ninguna preferencia por ser el primero o el segundo de la lista.
-4. Determina el ganador final en consenso y su probabilidad real de victoria (entre 50 y 96). La probabilidad del perdedor será (100 - prob_ganador).
+1. Revisa los datos reales aportados por Perplexity (H2H, victorias recientes, estado de forma) y el veredicto de Perplexity.
+2. Si el reporte indica que NO hay datos ni estadísticas reales de los jugadores, pon `"datos_reales": false` y `"prob_ganador": 50`.
+3. Haz tu propio análisis matemático independiente comparando los números de "{player1}" y los números de "{player2}".
+4. El ganador debe elegirse 100% por mérito estadístico (mejor H2H y mejor racha reciente), sin importar quién fue nombrado primero o segundo.
+5. Determina el ganador final y su probabilidad real de victoria (entre 50 y 96). Solo asigna >= 75% si hay ventaja clara en racha o H2H, y >= 85% si el dominio es muy marcado.
 
-REPORTE COMPLETO Y VEREDICTO DE PERPLEXITY:
+REPORTE Y VEREDICTO DE PERPLEXITY:
 \"\"\"
 {datos_perplexity}
 \"\"\"
 
 Devuelve estrictamente este JSON válido:
 {{
+  "datos_reales": true,
   "ganador_perplexity": "Nombre del jugador que Perplexity vio mejor",
   "ganador_openai": "Nombre exacto del ganador tras tu análisis ('{player1}' o '{player2}')",
-  "prob_ganador": 80,
+  "prob_ganador": 78,
   "rating": 8.2,
-  "resumen": "Explica brevemente el H2H, la racha reciente y por qué ambos análisis apuntan a este ganador.",
+  "resumen": "Explica con cifras el H2H, la racha reciente y por qué gana el favorito.",
   "value_bet": "Sí / No"
 }}
 """
@@ -223,14 +215,21 @@ Devuelve estrictamente este JSON válido:
             content = content[3:-3].strip()
 
         data = json.loads(content)
+        datos_reales = bool(data.get("datos_reales", True))
+        resumen = str(data.get("resumen", "")).strip()
+
+        frases_sin_datos = ("falta de datos", "falta de información", "no se encontraron", "sin datos específicos", "no hay información")
+        if not datos_reales or any(f in resumen.lower() for f in frases_sin_datos):
+            log.info("❌ Descartado por falta de datos: %s vs %s", player1, player2)
+            return "NINGUNO", 5.0, 50, "Sin estadísticas verificables."
+
         ganador_raw = str(data.get("ganador_openai", "")).strip()
         ganador_pplx = str(data.get("ganador_perplexity", "")).strip()
-        prob_ganador = int(data.get("prob_ganador", 75))
+        prob_ganador = int(data.get("prob_ganador", 50))
         prob_ganador = max(50, min(98, prob_ganador))
         prob_perdedor = 100 - prob_ganador
         rating = float(data.get("rating", 8.0))
 
-        # Identifica con precisión a cuál de los dos jugadores corresponde el nombre del ganador
         if player2.lower() in ganador_raw.lower() and player1.lower() not in ganador_raw.lower():
             fav = player2
             prob_p1 = prob_perdedor
@@ -251,7 +250,6 @@ Devuelve estrictamente este JSON válido:
                 prob_p1 = prob_ganador
                 prob_p2 = prob_perdedor
 
-        resumen = data.get("resumen", "Análisis completado por consenso.")
         value_bet = data.get("value_bet", "Sí" if prob_ganador >= 75 else "No")
 
         details = (
@@ -265,10 +263,10 @@ Devuelve estrictamente este JSON válido:
 
     except Exception as exc:
         log.warning("Error en OpenAI: %s", exc)
-        return player1, 7.5, 75, f"📊 Probabilidades: {player1}: 50% | {player2}: 50%\nArgumentos: Error de análisis\nValue Bet: No"
+        return "NINGUNO", 5.0, 50, "Error de análisis."
 
 
-# ---------------- CARGA DE PARTIDOS (CADA HORA INDIVIDUAL) ----------------
+# ---------------- CARGA DE PARTIDOS (BLOQUES DE 30 MINUTOS) ----------------
 
 def cargar_partidos_desde_txt():
     archivo = "partidos.txt"
@@ -297,18 +295,22 @@ def cargar_partidos_desde_txt():
             try:
                 h, m = map(int, time_str.split(":"))
                 target_date = hoy_dt
-                if h < 6 and hoy_dt.hour >= 20:
+                # Si son las 8 PM o más y el partido es de madrugada/mañana (00:00 a 18:59), pertenece al día siguiente
+                if h < 19 and hoy_dt.hour >= 20:
                     target_date = hoy_dt + timedelta(days=1)
 
                 match_dt = target_date.replace(hour=h, minute=m, second=0, microsecond=0)
                 ts = int(match_dt.timestamp())
-                hour_block = f"{target_date.date().isoformat()}_{h:02d}:00"
+
+                # Agrupación por cada MEDIA HORA (ej. 07:00 o 07:30)
+                half_m = 30 if m >= 30 else 0
+                hour_block = f"{target_date.date().isoformat()}_{h:02d}:{half_m:02d}"
             except Exception:
                 ts = int(time.time()) + (idx + 1) * 1800
                 hour_block = f"{hoy_dt.date().isoformat()}_{time_str.strip()}"
 
             partidos.append({
-                "id": f"match_{hoy_dt.date().isoformat()}_{idx}_{time_str.replace(':', '')}",
+                "id": f"match_{target_date.date().isoformat()}_{idx}_{time_str.replace(':', '')}",
                 "player1": player1.strip(),
                 "player2": player2.strip(),
                 "time": time_str.strip(),
@@ -325,7 +327,7 @@ def fetch_fixtures_only():
             c.execute("""INSERT OR REPLACE INTO fixtures(event_id, player1, player2, start_ts, hour_block) 
                         VALUES (?,?,?,?,?)""",
                       (it["id"], it["player1"], it["player2"], it["timestamp"], it["hour_block"]))
-    log.info("Cartelera cargada: %s eventos (Franjas de 1 hora).", len(items))
+    log.info("Cartelera cargada: %s eventos (Franjas de 30 minutos).", len(items))
 
 
 def resolve_results():
@@ -337,7 +339,7 @@ def resolve_results():
             c.execute("UPDATE picks SET hit=1 WHERE event_id=?", (r["event_id"],))
 
 
-# ---------------- SELECCIÓN DEL MEJOR PARTIDO (75% FRANJA | 85% STAKE 100 | 92% SEGURO) ----------------
+# ---------------- SELECCIÓN ESTRICTA CADA MEDIA HORA (>= 75% | STAKE 100 >= 85% ESTRICTO) ----------------
 
 def select_best_pick_for_current_blocks():
     now = int(time.time())
@@ -365,14 +367,14 @@ def select_best_pick_for_current_blocks():
             FROM fixtures
             WHERE hour_block = ? AND start_ts > ?
             ORDER BY start_ts ASC
-        """, (target_block, now + 5 * 60)).fetchall()]
+        """, (target_block, now + 3 * 60)).fetchall()]
 
     if not block_matches:
         return None, None, 0
 
-    log.info("Evaluando franja horaria %s (%d partidos)...", target_block, len(block_matches))
+    log.info("Evaluando bloque de MEDIA HORA %s (%d partidos)...", target_block, len(block_matches))
 
-    all_analyzed = []
+    valid_analyzed = []
     with db() as c:
         for r in block_matches:
             eid = r["event_id"]
@@ -389,34 +391,34 @@ def select_best_pick_for_current_blocks():
                 prob_ganador = an["prob"]
                 details = an["details"]
 
-            all_analyzed.append({
-                **r,
-                "fav": fav,
-                "rating": rating,
-                "details": details,
-                "prob": prob_ganador
-            })
+            # REGLA ESTRICTA: Solo entran los partidos que superen o igualen el 75%
+            if prob_ganador >= FRANJA_MIN_PROB and fav != "NINGUNO":
+                valid_analyzed.append({
+                    **r,
+                    "fav": fav,
+                    "rating": rating,
+                    "details": details,
+                    "prob": prob_ganador
+                })
 
-    if not all_analyzed:
+    if not valid_analyzed:
+        log.info("🛑 Ningún partido del bloque de media hora %s alcanzó el %d%%. No se envía pick.", target_block, FRANJA_MIN_PROB)
         return None, None, 0
 
-    all_analyzed.sort(key=lambda x: (x["prob"], x["rating"]), reverse=True)
-    best_match = all_analyzed[0]
+    # Ordena de mayor a menor probabilidad y rating para elegir el mejor de la media hora
+    valid_analyzed.sort(key=lambda x: (x["prob"], x["rating"]), reverse=True)
+    best_match = valid_analyzed[0]
     best_prob = best_match["prob"]
 
-    sent_today = count_100_today()
-    can_send_100 = seconds_since_last_100() >= 2 * 3600
-    flow = "normal"
-
+    # Asignación estricta: Stake Seguro (>= 92%), Stake 100 (>= 85%), Normal (75% a 84%)
     if best_prob >= STAKE_SEGURO_MIN:
         flow = "seguro"
         log.info("🚨 STAKE SEGURO DETECTADO (>= 92%%) -> %s (%d%%)", best_match["fav"], best_prob)
-    elif sent_today < DAILY_MIN_100 and can_send_100:
-        if best_prob >= STAKE_100_MIN:
-            flow = "100"
-        elif best_prob >= STAKE_100_FALLBACK_MIN:
-            flow = "100"
-            log.info("Stake 100 por proximidad al 85%% -> %s (%d%%)", best_match["fav"], best_prob)
+    elif best_prob >= STAKE_100_MIN:
+        flow = "100"
+        log.info("🔥 STAKE 100 INMEDIATO DETECTADO (>= 85%%) -> %s (%d%%)", best_match["fav"], best_prob)
+    else:
+        flow = "normal"
 
     return best_match, flow, best_prob
 
@@ -429,22 +431,19 @@ def format_message(p, flow, mins, prob):
     if flow == "seguro":
         stake = "SEGURO (MÁXIMO) 🚨"
         header = (
-            f"🚨🚨🚨 ⚠️ <b>STAKE SEGURO DETECTADO</b> ⚠️ 🚨🚨🚨\n"
+            f"🚨🚨🚨 ⚠️ <b>TT ELITE - STAKE SEGURO DETECTADO</b> ⚠️ 🚨🚨🚨\n"
             f"💣🔥 <b>PROBABILIDAD EXTREMA: {prob}%</b> 🔥💣\n"
             f"‼️ <b>ALERTA DE MÁXIMA CONFIANZA</b> ‼️"
         )
     elif flow == "100":
-        stake = 100
-        if prob >= STAKE_100_MIN:
-            header = f"🔥 <b>STAKE 100 (Probabilidad: {prob}%)</b>"
-        else:
-            header = f"🔥 <b>STAKE 100 - MÁS CERCANO AL 85% (Probabilidad: {prob}%)</b>"
+        stake = "100 🔥"
+        header = (
+            f"🔥🔥🚨 <b>ALERTA ESPECIAL: STAKE 100 DETECTADO</b> 🚨🔥🔥\n"
+            f"🎯 <b>FAVORITO DE ALTA PROBABILIDAD: {prob}%</b> 🎯"
+        )
     else:
         stake = int(max(7, min(9, round(p["rating"]))))
-        if prob >= FRANJA_MIN_PROB:
-            header = f"🏓 <b>PICK FRANJA HORARIA (Favorito: {prob}%)</b>"
-        else:
-            header = f"🏓 <b>MEJOR DE LA FRANJA (Favorito: {prob}%)</b>"
+        header = f"🏓 <b>TT ELITE - MEJOR PICK MEDIA HORA (Favorito: {prob}%)</b>"
 
     lines = [
         header,
@@ -460,6 +459,8 @@ def format_message(p, flow, mins, prob):
 
     if flow == "seguro":
         lines += ["", "🚨⚠️ <b>¡ENTRAR CON CONFIANZA! FAVORITO SUPERIOR AL 92%</b> ⚠️🚨"]
+    elif flow == "100":
+        lines += ["", "🔥⚡ <b>¡OPORTUNIDAD FUERTE! SUPERA EL 85% DE PROBABILIDAD</b> ⚡🔥"]
 
     return "\n".join(lines)
 
@@ -506,7 +507,7 @@ async def run_cycle(app):
                 (best_p["event_id"], flow, best_p["rating"], best_p["fav"], best_p["player1"],
                  best_p["player2"], best_p["start_ts"], int(time.time()), best_p["details"], best_p["hour_block"]))
 
-        log.info("Pick enviado -> Franja: %s | Flujo: %s | Ganador: %s (%d%%)",
+        log.info("Pick enviado -> Bloque 30m: %s | Flujo: %s | Ganador: %s (%d%%)",
                  best_p["hour_block"], flow, best_p["fav"], prob)
 
 
@@ -522,17 +523,17 @@ async def monitor_loop(app: Application):
 # ---------------- COMANDOS TELEGRAM ----------------
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🏓 Bot v51 (Doble Consenso) Activo.\n/estado · /resumen · /partidos · /test")
+    await update.message.reply_text("🏓 TT Elite v52 (Cada 30m) Activo.\n/estado · /resumen · /partidos · /test")
 
 
 async def cmd_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     pplx_ok = "✅ Conectada" if PERPLEXITY_API_KEY else "⚠️ Sin API Key"
     oai_ok = "✅ Conectada" if openai_client else "⚠️ Sin API Key"
     await update.message.reply_text(
-        f"✅ Bot v51 Operativo (Doble Consenso).\n"
-        f"🚨 Stake Seguro: >= {STAKE_SEGURO_MIN}%\n"
-        f"🔥 Stake 100: >= {STAKE_100_MIN}% (Fallback {STAKE_100_FALLBACK_MIN}%)\n"
-        f"🏓 Franja: >= {FRANJA_MIN_PROB}% (con Fallback al mejor)\n"
+        f"✅ TT Elite v52 Operativo (Bloques de 30 min).\n"
+        f"🚨 Stake Seguro: Estricto >= {STAKE_SEGURO_MIN}%\n"
+        f"🔥 Stake 100 Especial: Estricto >= {STAKE_100_MIN}% (Sin fallback)\n"
+        f"🏓 Pick Media Hora: Estricto >= {FRANJA_MIN_PROB}%\n"
         f"Perplexity: {pplx_ok} | OpenAI: {oai_ok}"
     )
 
@@ -541,7 +542,7 @@ async def cmd_estado(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     with db() as c:
         n_fix = c.execute("SELECT COUNT(*) FROM fixtures WHERE start_ts>?", (int(time.time()),)).fetchone()[0]
     await update.message.reply_text(
-        f"🟢 Estado del Sistema\nPartidos futuros: {n_fix}\nStakes Fuertes hoy: {count_100_today()}/{DAILY_MIN_100}"
+        f"🟢 Estado del Sistema (Franjas 30 min)\nPartidos futuros: {n_fix}\nStakes Fuertes enviados hoy: {count_100_today()}"
     )
 
 
@@ -568,7 +569,7 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Sin partidos programados.")
         return
 
-    lines = [f"📋 <b>Cartelera Próxima:</b>"]
+    lines = [f"📋 <b>Cartelera Próxima (Franjas de 30m):</b>"]
     for r in rows:
         hh = datetime.fromtimestamp(r["start_ts"], TZ).strftime("%I:%M %p")
         lines.append(f"• <b>{hh}</b> | Blq: {r['hour_block']} | {r['player1']} vs {r['player2']}")
@@ -580,7 +581,7 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 @web.get("/")
 def home():
-    return "Bot v51 Activo", 200
+    return "TT Elite v52 Activo", 200
 
 
 @web.get("/health")
@@ -611,7 +612,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    log.info("Iniciando Bot v51 (Doble Consenso Perplexity + OpenAI)...")
+    log.info("Iniciando TT Elite v52 (30 min + >=75%% Estricto + Stake 100 >=85%% Estricto)...")
     app.run_polling(drop_pending_updates=True)
 
 
