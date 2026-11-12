@@ -1,5 +1,5 @@
 """
-TT Elite Series v57.7 (POLONIA) - Perplexity /v1/responses + Menú Completo + Selección Inteligente
+TT Elite Series v57.8 (POLONIA) - Modelo Perplexity corregido a 'sonar' + Control de Conflicto
 Pick Media Hora (>= 78%) | Stake 100 / Acierto Total (>= 89%) | Multi-Chat (/activar_grupo)
 """
 
@@ -30,7 +30,7 @@ PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "").strip()
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "120"))
-DB_PATH = os.getenv("DB_PATH", "tt_elite_v577.db")
+DB_PATH = os.getenv("DB_PATH", "tt_elite_v578.db")
 
 LEAD_MIN = 35
 MIN_LEAD_MIN = 5
@@ -108,7 +108,7 @@ def block_already_sent(hour_block):
         return row[0] > 0 if row else False
 
 
-# ---------------- PASO 1: PERPLEXITY (AGENT API /v1/responses) ----------------
+# ---------------- PASO 1: PERPLEXITY (AGENT API /v1/responses CON MODELO 'sonar') ----------------
 
 def investigar_con_perplexity(player1: str, player2: str) -> str:
     if not PERPLEXITY_API_KEY:
@@ -129,7 +129,7 @@ def investigar_con_perplexity(player1: str, player2: str) -> str:
     }
 
     payload = {
-        "model": "sonar-pro",
+        "model": "sonar",
         "input": prompt_busqueda,
         "tools": [{"type": "web_search"}]
     }
@@ -567,7 +567,7 @@ async def cmd_partidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 @web.get("/")
 def home():
-    return "TT Elite v57.7 Activo", 200
+    return "TT Elite v57.8 Activo", 200
 
 
 @web.get("/health")
@@ -602,7 +602,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    log.info("Iniciando TT Elite v57.7 con /v1/responses...")
+    log.info("Iniciando TT Elite v57.8...")
     app.run_polling(drop_pending_updates=True)
 
 
