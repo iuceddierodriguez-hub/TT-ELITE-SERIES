@@ -1,53 +1,501 @@
-19:10 | Michalik J. vs Oracz J.
-19:20 | Baran M. vs Maszczynski D.
-19:20 | Eliasz A. vs Gronowski W.
-19:20 | Kuzmicz J. vs Staszczyk K.
-19:30 | Szostok S. vs Tkaczyk H.
-19:35 | Kumor M. vs Jedrzejowski O.
-19:45 | Fomin A. vs Gesiarz P.
-19:45 | Kukawka M. vs Kesic G.
-19:45 | Mugowski A. vs Klocek K.
-19:55 | Szymik R. vs Badura J.
-20:00 | Skorupa J. vs Michalik J.
-20:10 | Eliasz A. vs Mugowski A.
-20:10 | Kuzmicz J. vs Kukawka M.
-20:10 | Malcher K. vs Karpiuk M.
-20:20 | Bernacki L. vs Wiza R.
-20:25 | Pawlik C. vs Oracz J.
-20:35 | Baran M. vs Gesiarz P.
-20:35 | Kesic G. vs Mlynarski F.
-20:35 | Klocek K. vs Kotwica D.
-20:45 | Kumor M. vs Michalik J.
-20:45 | Szostok S. vs Szymik R.
-21:00 | Fomin A. vs Malcher K.
-21:10 | Skorupa J. vs Pawlik C.
-21:10 | Wiza R. vs Tkaczyk H.
-21:25 | Karpiuk M. vs Maszczynski D.
-21:30 | Bernacki L. vs Badura J.
-21:35 | Oracz J. vs Jedrzejowski O.
-21:45 | Baran M. vs Malcher K.
-21:55 | Szymik R. vs Tkaczyk H.
-22:00 | Kumor M. vs Pawlik C.
-22:10 | Gesiarz P. vs Maszczynski D.
-22:20 | Michalik J. vs Jedrzejowski O.
-22:20 | Szostok S. vs Bernacki L.
-22:35 | Fomin A. vs Karpiuk M.
-22:45 | Skorupa J. vs Oracz J.
-22:45 | Wiza R. vs Badura J.
-23:00 | Adamiak G. vs Dosz A.
-23:00 | Marchlewski M. vs Chrzescian R.
-23:00 | Poloszczanski D. vs Staniszewski P.
-23:00 | Swider D. vs Szymanski I.
-23:05 | Szymik R. vs Bernacki L.
-23:10 | Kaczynski P. vs Lojtek T.
-23:20 | Piotrowski T. vs Kostyk K.
-23:25 | Jesiek J. vs Polok P.
-23:25 | Michna D. vs Murawski M.
-23:25 | Sinicki M. vs Kowol M.
-23:30 | Szostok S. vs Wiza R.
-23:35 | Juszczyk K. vs Zemla P.
-23:40 | Kosmal D. vs Alan Wos
-23:45 | Petas K. vs Gawlas M.
-23:50 | Sulkowski K. vs Wisniewski B.
-23:50 | Wojtaszczyk W. vs Slawinski K.
-23:55 | Badura J. vs Tkaczyk H.
+00:00 | Koczyba M. vs Mecik P.
+
+00:00 | Marchlewski M. vs Piotrowski T.
+
+00:10 | Adamiak G. vs Michna D.
+
+00:10 | Poloszczanski D. vs Sinicki M.
+
+00:10 | Swider D. vs Jesiek J.
+
+00:20 | Szymik R. vs Wiza R.
+
+00:25 | Kaczynski P. vs Juszczyk K.
+
+00:25 | Alan Wos vs Chrzescian R.
+
+00:30 | Wisniewski B. vs Staniszewski P.
+
+00:30 | Gawlas M. vs Dosz A.
+
+00:30 | Slawinski K. vs Szymanski I.
+
+00:40 | Bernacki L. vs Tkaczyk H.
+
+00:50 | Mecik P. vs Lojtek T.
+
+00:50 | Kosmal D. vs Kostyk K.
+
+00:55 | Petas K. vs Murawski M.
+
+00:55 | Wojtaszczyk W. vs Polok P.
+
+00:55 | Sulkowski K. vs Kowol M.
+
+01:05 | Szostok S. vs Badura J.
+
+01:10 | Koczyba M. vs Zemla P.
+
+01:15 | Michna D. vs Dosz A.
+
+01:15 | Piotrowski T. vs Chrzescian R.
+
+01:15 | Sinicki M. vs Staniszewski P.
+
+01:15 | Jesiek J. vs Szymanski I.
+
+01:30 | Jedrzejak P. vs Buczynski W.
+
+01:35 | Juszczyk K. vs Lojtek T.
+
+01:35 | Marchlewski M. vs Kosmal D.
+
+01:40 | Adamiak G. vs Petas K.
+
+01:40 | Poloszczanski D. vs Sulkowski K.
+
+01:40 | Swider D. vs Wojtaszczyk W.
+
+01:55 | Oracz M. vs Malecha M.
+
+02:00 | Kaczynski P. vs Koczyba M.
+
+02:00 | Alan Wos vs Kostyk K.
+
+02:05 | Gawlas M. vs Murawski M.
+
+02:05 | Wisniewski B. vs Kowol M.
+
+02:05 | Slawinski K. vs Polok P.
+
+02:20 | Adamus M. vs Wojcik R.
+
+02:25 | Piotrowski T. vs Kosmal D.
+
+02:25 | Mecik P. vs Zemla P.
+
+02:30 | Michna D. vs Petas K.
+
+02:30 | Sinicki M. vs Sulkowski K.
+
+02:30 | Jesiek J. vs Wojtaszczyk W.
+
+02:45 | Juszczyk K. vs Koczyba M.
+
+02:45 | Jedrzejak P. vs Oracz M.
+
+02:50 | Marchlewski M. vs Alan Wos
+
+02:55 | Poloszczanski D. vs Wisniewski B.
+
+02:55 | Adamiak G. vs Gawlas M.
+
+02:55 | Swider D. vs Slawinski K.
+
+03:10 | Wojcik R. vs Buczynski W.
+
+03:10 | Kaczynski P. vs Mecik P.
+
+03:15 | Kostyk K. vs Chrzescian R.
+
+03:20 | Murawski M. vs Dosz A.
+
+03:20 | Kowol M. vs Staniszewski P.
+
+03:20 | Polok P. vs Szymanski I.
+
+03:30 | Adamus M. vs Malecha M.
+
+03:35 | Zemla P. vs Lojtek T.
+
+03:40 | Sinicki M. vs Wisniewski B.
+
+03:40 | Piotrowski T. vs Alan Wos
+
+03:45 | Jesiek J. vs Slawinski K.
+
+03:45 | Michna D. vs Gawlas M.
+
+03:55 | Oracz M. vs Buczynski W.
+
+04:00 | Juszczyk K. vs Mecik P.
+
+04:05 | Petas K. vs Dosz A.
+
+04:05 | Kosmal D. vs Chrzescian R.
+
+04:10 | Sulkowski K. vs Staniszewski P.
+
+04:10 | Wojtaszczyk W. vs Szymanski I.
+
+04:20 | Koczyba M. vs Lojtek T.
+
+04:20 | Jedrzejak P. vs Adamus M.
+
+04:30 | Adamiak G. vs Murawski M.
+
+04:30 | Marchlewski M. vs Kostyk K.
+
+04:35 | Poloszczanski D. vs Kowol M.
+
+04:35 | Swider D. vs Polok P.
+
+04:45 | Wojcik R. vs Malecha M.
+
+04:45 | Kaczynski P. vs Zemla P.
+
+05:00 | Wisniewski B. vs Sinicki M.
+
+05:00 | Gawlas M. vs Dosz A.
+
+05:00 | Alan Wos vs Piotrowski T.
+
+05:00 | Slawinski K. vs Szymanski I.
+
+05:05 | Oracz M. vs Adamus M.
+
+05:20 | Adamiak G. vs Petas K.
+
+05:20 | Marchlewski M. vs Kosmal D.
+
+05:25 | Poloszczanski D. vs Sulkowski K.
+
+05:25 | Jesiek J. vs Polok P.
+
+05:30 | Jedrzejak P. vs Wojcik R.
+
+05:40 | Kolodziej K. vs Murawski M.
+
+05:45 | Chrzescian R. vs Kostyk K.
+
+05:50 | Staniszewski P. vs Kowol M.
+
+05:50 | Wojtaszczyk W. vs Swider D.
+
+05:55 | Malecha M. vs Buczynski W.
+
+06:00 | Gawlas M. vs Adamiak G.
+
+06:05 | Alan Wos vs Marchlewski M.
+
+06:10 | Wisniewski B. vs Poloszczanski D.
+
+06:10 | Slawinski K. vs Jesiek J.
+
+06:20 | Oracz M. vs Wojcik R.
+
+06:25 | Murawski M. vs Dosz A.
+
+06:30 | Kostyk K. vs Piotrowski T.
+
+06:35 | Kowol M. vs Sinicki M.
+
+06:35 | Swider D. vs Szymanski I.
+
+06:40 | Adamus M. vs Buczynski W.
+
+06:50 | Kolodziej K. vs Petas K.
+
+06:55 | Chrzescian R. vs Kosmal D.
+
+07:00 | Staniszewski P. vs Sulkowski K.
+
+07:00 | Wojtaszczyk W. vs Polok P.
+
+07:05 | Jedrzejak P. vs Malecha M.
+
+07:15 | Adamiak G. vs Dosz A.
+
+07:20 | Marchlewski M. vs Piotrowski T.
+
+07:25 | Poloszczanski D. vs Sinicki M.
+
+07:25 | Jesiek J. vs Szymanski I.
+
+07:30 | Wojcik R. vs Buczynski W.
+
+07:40 | Gawlas M. vs Kolodziej K.
+
+07:45 | Alan Wos vs Chrzescian R.
+
+07:50 | Wisniewski B. vs Staniszewski P.
+
+07:50 | Slawinski K. vs Wojtaszczyk W.
+
+07:55 | Oracz M. vs Malecha M.
+
+08:05 | Murawski M. vs Petas K.
+
+08:10 | Kostyk K. vs Kosmal D.
+
+08:15 | Kowol M. vs Sulkowski K.
+
+08:15 | Swider D. vs Polok P.
+
+08:20 | Adamus M. vs Jedrzejak P.
+
+08:30 | Adamiak G. vs Kolodziej K.
+
+08:35 | Marchlewski M. vs Chrzescian R.
+
+08:40 | Poloszczanski D. vs Staniszewski P.
+
+08:40 | Jesiek J. vs Wojtaszczyk W.
+
+08:45 | Wojcik R. vs Oracz M.
+
+08:55 | Gawlas M. vs Murawski M.
+
+09:00 | Alan Wos vs Kostyk K.
+
+09:05 | Wisniewski B. vs Kowol M.
+
+09:05 | Slawinski K. vs Swider D.
+
+09:10 | Jedrzejak P. vs Buczynski W.
+
+09:20 | Petas K. vs Dosz A.
+
+09:25 | Kosmal D. vs Piotrowski T.
+
+09:30 | Sulkowski K. vs Sinicki M.
+
+09:30 | Adamus M. vs Malecha M.
+
+09:30 | Polok P. vs Szymanski I.
+
+09:45 | Adamiak G. vs Murawski M.
+
+09:50 | Marchlewski M. vs Kostyk K.
+
+09:55 | Oracz M. vs Buczynski W.
+
+09:55 | Poloszczanski D. vs Kowol M.
+
+09:55 | Jesiek J. vs Swider D.
+
+10:10 | Kolodziej K. vs Dosz A.
+
+10:15 | Chrzescian R. vs Piotrowski T.
+
+10:20 | Wojcik R. vs Adamus M.
+
+10:20 | Staniszewski P. vs Sinicki M.
+
+10:20 | Wojtaszczyk W. vs Szymanski I.
+
+10:35 | Gawlas M. vs Petas K.
+
+10:35 | Alan Wos vs Kosmal D.
+
+10:40 | Wisniewski B. vs Sulkowski K.
+
+10:40 | Slawinski K. vs Polok P.
+
+10:45 | Jedrzejak P. vs Malecha M.
+
+11:00 | Mlynarski F. vs Kuzmicz J.
+
+11:00 | Klocek K. vs Kotwica D.
+
+11:00 | Brunner M. vs Mucha G.
+
+11:05 | Oracz M. vs Adamus M.
+
+11:10 | Sawicki G. vs Slosarczyk P.
+
+11:25 | Zochniak J. vs Kukawka M.
+
+11:25 | Sulkowski B. vs Rudomina K.
+
+11:25 | Michalik J. vs Krezel A.
+
+11:30 | Wojcik R. vs Jedrzejak P.
+
+11:35 | Bernacki L. vs Kurek P.
+
+11:45 | Staszczyk K. vs Stapor R.
+
+11:50 | Smoter A. vs Minda M.
+
+11:50 | Karpiuk M. vs Fomin A.
+
+11:55 | Malecha M. vs Buczynski W.
+
+12:00 | Guzik M. vs Adamus P.
+
+12:05 | Mlynarski F. vs Zochniak J.
+
+12:15 | Brunner M. vs Michalik J.
+
+12:15 | Klocek K. vs Sulkowski B.
+
+12:20 | Oracz M. vs Jedrzejak P.
+
+12:25 | Sawicki G. vs Bernacki L.
+
+12:30 | Stapor R. vs Kuzmicz J.
+
+12:35 | Minda M. vs Kotwica D.
+
+12:35 | Fomin A. vs Mucha G.
+
+12:40 | Adamus M. vs Buczynski W.
+
+12:50 | Adamus P. vs Slosarczyk P.
+
+12:55 | Smoter A. vs Rudomina K.
+
+12:55 | Staszczyk K. vs Kukawka M.
+
+12:55 | Karpiuk M. vs Krezel A.
+
+13:05 | Wojcik R. vs Malecha M.
+
+13:10 | Guzik M. vs Kurek P.
+
+13:20 | Zochniak J. vs Kuzmicz J.
+
+13:20 | Sulkowski B. vs Kotwica D.
+
+13:20 | Michalik J. vs Mucha G.
+
+13:30 | Schaniel K. vs Dytko D.
+
+13:35 | Bernacki L. vs Slosarczyk P.
+
+13:40 | Mlynarski F. vs Staszczyk K.
+
+13:45 | Brunner M. vs Karpiuk M.
+
+13:45 | Klocek K. vs Smoter A.
+
+13:55 | Oracz L. vs Pruszkowski J.
+
+14:00 | Sawicki G. vs Guzik M.
+
+14:05 | Stapor R. vs Kukawka M.
+
+14:10 | Minda M. vs Rudomina K.
+
+14:10 | Fomin A. vs Krezel A.
+
+14:20 | Nowak J. vs Marud G.
+
+14:25 | Adamus P. vs Kurek P.
+
+14:30 | Zochniak J. vs Staszczyk K.
+
+14:30 | Michalik J. vs Karpiuk M.
+
+14:30 | Sulkowski B. vs Smoter A.
+
+14:45 | Schaniel K. vs Oracz L.
+
+14:45 | Bernacki L. vs Guzik M.
+
+14:50 | Mlynarski F. vs Stapor R.
+
+14:55 | Klocek K. vs Minda M.
+
+14:55 | Brunner M. vs Fomin A.
+
+15:10 | Sawicki G. vs Adamus P.
+
+15:10 | Marud G. vs Dytko D.
+
+15:15 | Kukawka M. vs Kuzmicz J.
+
+15:20 | Rudomina K. vs Kotwica D.
+
+15:20 | Krezel A. vs Mucha G.
+
+15:30 | Nowak J. vs Pruszkowski J.
+
+15:35 | Kurek P. vs Slosarczyk P.
+
+15:40 | Zochniak J. vs Stapor R.
+
+15:40 | Sulkowski B. vs Minda M.
+
+15:40 | Michalik J. vs Fomin A.
+
+15:55 | Oracz L. vs Dytko D.
+
+16:00 | Bernacki L. vs Adamus P.
+
+16:05 | Staszczyk K. vs Kuzmicz J.
+
+16:05 | Smoter A. vs Kotwica D.
+
+16:05 | Karpiuk M. vs Mucha G.
+
+16:20 | Schaniel K. vs Nowak J.
+
+16:20 | Guzik M. vs Slosarczyk P.
+
+16:30 | Klocek K. vs Rudomina K.
+
+16:30 | Mlynarski F. vs Kukawka M.
+
+16:30 | Brunner M. vs Krezel A.
+
+16:45 | Marud G. vs Pruszkowski J.
+
+16:45 | Sawicki G. vs Kurek P.
+
+17:00 | Stapor R. vs Mlynarski F.
+
+17:00 | Fomin A. vs Mucha G.
+
+17:05 | Oracz L. vs Nowak J.
+
+17:05 | Kotwica D. vs Klocek K.
+
+17:10 | Adamus P. vs Slosarczyk P.
+
+17:20 | Michalik J. vs Krezel A.
+
+17:25 | Kukawka M. vs Staszczyk K.
+
+17:30 | Schaniel K. vs Marud G.
+
+17:30 | Rudomina K. vs Smoter A.
+
+17:35 | Bernacki L. vs Kurek P.
+
+17:45 | Karpiuk M. vs Brunner M.
+
+17:50 | Kukawka M. vs Sulkowski B.
+
+17:55 | Rudomina K. vs Durda M.
+
+17:55 | Pruszkowski J. vs Dytko D.
+
+18:00 | Guzik M. vs Sawicki G.
+
+18:10 | Mlynarski F. vs Staszczyk K.
+
+18:10 | Fomin A. vs Michalik J.
+
+18:15 | Klocek K. vs Smoter A.
+
+18:20 | Oracz L. vs Marud G.
+
+18:25 | Adamus P. vs Bernacki L.
+
+18:35 | Sulkowski B. vs Mlynarski F.
+
+18:35 | Durda M. vs Klocek K.
+
+18:35 | Brunner M. vs Mucha G.
+
+18:40 | Nowak J. vs Dytko D.
+
+18:50 | Sawicki G. vs Slosarczyk P.
+
+18:55 | Stapor R. vs Staszczyk K.
+
+18:55 | Kotwica D. vs Smoter A.
+
+18:55 | Karpiuk M. vs Krezel A.
